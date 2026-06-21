@@ -3,6 +3,10 @@
 > This file is the **entry point** for any agent working in this repository.
 > It is NOT a rulebook: it is a **map**. Read only what you need, when you need
 > it (progressive disclosure).
+>
+> **Stack:** Next.js (App Router) · Supabase (Postgres + Auth + Storage, hosted) ·
+> Prisma · Tailwind + shadcn/ui · dnd-kit · deployed on Vercel · TypeScript.
+> Package manager: **pnpm**. Tests: **Vitest** (unit/component) + **Playwright** (E2E).
 
 ---
 
@@ -20,27 +24,33 @@
 | `feature_list.json`        | Task list with status (`pending` / `spec_ready` / `in_progress` / `done` / `blocked`) | Always, at start |
 | `progress/current.md`      | Current session state                                                            | Always, at start |
 | `progress/history.md`      | Append-only log of previous sessions                                             | If you need historical context |
+| `project-documents/`       | `client_requirement.md` (the app brief) + `solution_design.md` (approved architecture) | To understand what we're building |
 | `specs/<feature>/`         | `requirements.md` + `design.md` + `tasks.md` (Kiro-style)                        | Before implementing any `"sdd": true` feature |
-| `docs/architecture.md`     | What "doing a good job" means in this project (org model, design patterns)       | Before implementing |
-| `docs/conventions.md`      | Apex/LWC style, naming, metadata structure                                       | Before writing code |
+| `docs/architecture.md`     | What "doing a good job" means in this project (App Router, data access, RLS)     | Before implementing |
+| `docs/conventions.md`      | TypeScript/React/Tailwind/Prisma/dnd-kit style, naming, file structure          | Before writing code |
 | `docs/specs.md`            | SDD process: EARS notation, the 3 files, human approval gate                     | Before drafting or reading a spec |
-| `docs/verification.md`     | How to verify your work (Apex tests, coverage, requirement traceability)         | Before declaring a task `done` |
+| `docs/verification.md`     | How to verify your work (typecheck, lint, Vitest, Playwright, build, traceability) | Before declaring a task `done` |
 | `CHECKPOINTS.md`           | Objective criteria for "correct final state"                                     | To self-evaluate |
+| `init.sh`                  | Bootstrap + verification entry point (install, generate, typecheck, lint, test, build) | At session start; before handoff |
 | `.claude/agents/`          | Subagent definitions (`leader`, `spec_author`, `implementer`, `reviewer`)        | If you orchestrate work |
-| `force-app/main/default/`  | Salesforce metadata (Apex, LWC, objects, flows)                                  | To implement |
-| `tests/` & `**/*_Test.cls` | Apex tests and LWC Jest tests                                                     | To verify |
+| `src/` (or `app/`)         | Application code (App Router routes, components, server actions, lib)            | To implement |
+| `prisma/`                  | `schema.prisma`, migrations, seed                                                | To change the data model |
+| `**/*.test.ts(x)` & `e2e/` | Vitest unit/component tests and Playwright E2E tests                             | To verify |
 
 ## 3. Hard rules (non-negotiable)
 
 - **One feature at a time.** Do not mix changes from several tasks in one session.
-- **Never declare a task `done` without green tests.** make
-  sure the Apex test block passes 85% and meets the coverage threshold.
+- **Never declare a task `done` without green checks.** `typecheck`, `lint`,
+  `test`, and `build` must all pass and meet the coverage threshold.
 - **Never skip the spec phase.** Every `"sdd": true` feature must go through
-  `spec_author` and get human approval before any metadata changes.
+  `spec_author` and get human approval before any code changes.
 - **Never skip the human approval gate.** The leader stops at `spec_ready` and
   waits.
-- **Never deploy to production.** Validation against sandbox/scratch only.
-- **Never modify a Salesforce org manually** outside the source-driven flow.
+- **Never run destructive operations against the production database or deploy to
+  production.** Migrations target the **dev/staging** Supabase project only;
+  releases go to Vercel **preview** for validation.
+- **Never commit secrets.** Use `.env.local` (gitignored); document required keys
+  in `.env.example`.
 - **Document as you go** in `progress/current.md`, not at the end.
 - **Leave the repository clean** before closing the session (see §5).
 - **If you don't know something, look in `docs/`** before inventing it.
@@ -72,8 +82,8 @@ Before finishing:
 1. If the task is finished: set `status: "done"` in `feature_list.json`.
 2. Move the `progress/current.md` summary to the end of `progress/history.md`.
 3. Empty `progress/current.md`, leaving only the template.
-4. Leave no temp files, no `System.debug()` left in for debugging, no TODOs
-   without context.
+4. Leave no temp files, no stray `console.log` left in for debugging, no TODOs
+   without context, no uncommitted generated artifacts.
 
 ## 6. If you get stuck
 

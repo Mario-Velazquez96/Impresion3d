@@ -1,29 +1,60 @@
 # docs/verification.md — How to verify your work
 
-Read before declaring any task `done`.
+Read before declaring any task `done`. The fastest path is `./init.sh`, which
+runs the code-quality gates in order and stops at the first failure.
 
 ## Steps
 
-1. **Run the full test suite.**
+1. **Type-check.**
    ```
-   sf apex run test --result-format human --code-coverage --wait 10
+   pnpm typecheck      # tsc --noEmit
    ```
-   All tests must pass. Coverage must meet the target in `tasks.md` (default
-   ≥ 85% per class).
+   Zero errors. No new `any` / `@ts-ignore` without justification.
 
-2. **Validate the deployment** (never deploy to production):
+2. **Lint.**
    ```
-   sf project deploy validate --source-dir force-app -o <scratch-or-sandbox-alias>
+   pnpm lint           # eslint (next lint)
    ```
+   Zero errors. No leftover `console.log`/debug code.
 
-4. **Check requirement traceability.** For each `R<n>` in `requirements.md`,
-   confirm at least one test exercises it. Note the mapping in your progress
-   file, e.g. `R3 → RenewalOpportunity_Test.testClosedWonCreatesRenewal`.
+3. **Unit / component tests + coverage.**
+   ```
+   pnpm test           # vitest run --coverage
+   ```
+   All pass. Coverage meets the target in `tasks.md` (default ≥ 80% lines on
+   changed modules). Tests must assert behaviour, not just execute lines —
+   cover positive, negative, and edge/bulk paths.
 
-5. **Lint and clean up.** No `System.debug()` left in, no dead code, no TODOs
-   without context.
+4. **E2E tests** (for any feature with user-facing flows).
+   ```
+   pnpm test:e2e       # playwright test
+   ```
+   Skip only if the feature has no UI behaviour — and say so explicitly in the
+   progress file.
+
+5. **Production build.**
+   ```
+   pnpm build          # next build
+   ```
+   Must succeed. This catches Server/Client boundary mistakes, non-serializable
+   props, and bad imports that unit tests miss.
+
+6. **Migrations** (only if the data model changed).
+   ```
+   pnpm prisma migrate dev --name <change>     # against dev/staging Supabase
+   pnpm prisma migrate status                  # confirms applied & in sync
+   ```
+   The migration is committed and applies cleanly. **Never** target production.
+
+7. **Requirement traceability.** For each `R<n>` in `requirements.md`, confirm at
+   least one test exercises it. Record the mapping in your progress file, e.g.
+   `R3 → board-reorder.test.ts > "persists new column and position"`.
+
+8. **Clean up.** No dead code, no debug logging, no TODOs without context, no new
+   undocumented env var (add it to `.env.example`), no committed secrets.
 
 ## Definition of done
 
-A task is `done` only when steps 1–5 pass **and** the reviewer has written
-APPROVE in `progress/review_<feature>.md`.
+A task is `done` only when steps 1–8 pass (i.e. `./init.sh` exits 0, plus the
+manual traceability/migration checks) **and** the reviewer has written APPROVE in
+`progress/review_<feature>.md`. See `CHECKPOINTS.md` for the full objective list.

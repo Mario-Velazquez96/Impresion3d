@@ -1,46 +1,12 @@
 {
+  "$schema_note": "Each feature flows: pending -> spec_ready -> in_progress -> done (or blocked). 'sdd: true' features MUST pass through spec_author + the human approval gate before implementation. Keep features small and independently shippable; declare dependencies in 'depends_on'.",
   "features": [
     {
-      "name": "01_data_model",
-      "description": "Target__c + Task custom fields, Billing_City__c formula, Sequence_Step_Config__mdt (+10 rows) and Sequence_Terminal_Status__mdt (+4 rows), 10 Lightning Email Templates, Next_Action_Date__c index, permission sets. Pure metadata; foundation for everything.",
+      "name": "00_project_setup",
+      "description": "Bootstrap the Next.js (App Router, TypeScript) app: pnpm, Tailwind + shadcn/ui, Prisma wired to the hosted Supabase Postgres (DATABASE_URL pooled + DIRECT_URL), @supabase/ssr clients (browser + server) and auth middleware, dnd-kit installed, Vitest + Playwright configured, ESLint/Prettier, .env.example, and Vercel project settings. Foundation for everything.",
       "sdd": true,
-      "status": "spec_ready",
+      "status": "pending",
       "depends_on": []
-    },
-    {
-      "name": "02_core_engine",
-      "description": "Selectors + SequenceStepConfigService + SequenceEmailService (template/RE:/attachment/OWE) + SequenceEngineService.processStep (kill-switch guard, send, Call task, completed Email task, step advance, next-action scheduling). Callable core, unit/bulk tested in isolation.",
-      "sdd": true,
-      "status": "spec_ready",
-      "depends_on": ["01_data_model"]
-    },
-    {
-      "name": "03_event_entry_points",
-      "description": "TargetTrigger after-insert + SequenceStartQueueable (start step 1); TaskTrigger after-update + handler (sequence Call complete -> set Next_Action_Date = now + Days_Until_Next_Email). Thin event capture over the engine.",
-      "sdd": true,
-      "status": "spec_ready",
-      "depends_on": ["02_core_engine"]
-    },
-    {
-      "name": "04_scheduler_batch",
-      "description": "SequenceSchedulerBatch (Batchable+Stateful) selects active targets where Next_Action_Date <= now and step < 10 and advances each via processStep(step+1); SequenceSchedulerSchedulable runs it daily. One job realizes both the 4-day call waits and the 14/7/14/14 timers.",
-      "sdd": true,
-      "status": "spec_ready",
-      "depends_on": ["02_core_engine"]
-    },
-    {
-      "name": "05_terminal_stop_and_guards",
-      "description": "TargetTrigger before-update branch (Feature 11): terminal Status__c -> Sequence_Active__c=false + Stop Reason + clear Next_Action_Date, driven by Sequence_Terminal_Status__mdt. Adds a branch to the existing TargetTrigger from 03 (one trigger per object); confirms the manual kill switch.",
-      "sdd": true,
-      "status": "spec_ready",
-      "depends_on": ["03_event_entry_points"]
-    },
-    {
-      "name": "06_lwc_attachment",
-      "description": "targetEmailAttachment LWC + SequenceAttachmentController: single-file upload on the Target__c record page that stores the ContentDocumentId in Sequence_Attachment_Id__c for the engine to attach; Remove clears it; blank = no attachment.",
-      "sdd": true,
-      "status": "spec_ready",
-      "depends_on": ["01_data_model"]
     }
   ]
 }
