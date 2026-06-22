@@ -49,3 +49,19 @@
 **Reports:** `progress/impl_02_catalog_management.md`, `progress/review_02_catalog_management.md`.
 
 ---
+
+## 03_task_board_core — DONE (2026-06-22)
+
+**Feature:** Kanban task domain + statically rendered board (no dnd). Spec approved by human (RLS = any authenticated user reads/writes all tasks, no per-row ownership); implemented and reviewer-APPROVED.
+
+**Delivered:** `TaskState` enum + `Task` (categoryId→TaskCategory Restrict, assigneeId?→User SetNull, state default BACKLOG, integer position, indexes) + `Subtask` (taskId Cascade, done, position) models + migration; raw-SQL RLS (both tables, all verbs to authenticated); Zod `createTaskSchema`/`updateTaskSchema`/`subtaskSchema`/`toggleSchema`; `lib/services/tasks.ts` (listTasks w/ filter composition + no N+1, createTask end-of-column position, update/delete, subtask add/toggle/remove) — also registers a `taskCategory` reference counter with the 02 catalog delete-guard (first consumer of that hook); `actions/tasks.ts` (requireUser first, Zod, P2003 bad-FK → friendly error with no write, revalidate /board); Server-Component board (`/board` page + loading/error, BoardColumns/BoardColumn/TaskCard) with client islands TaskFilters (URL params)/TaskFormDialog/SubtaskList — Server/Client boundary kept clean so 04 can add a dnd island without a rewrite. No new runtime deps.
+
+**Requirements:** R1–R10 all satisfied and traced to tests.
+
+**Verification:** Credential-free pipeline green — typecheck 0 errors, lint 0, Vitest 207 tests/23 files (services + schemas ~100% coverage), build OK (`/board` dynamic, clean boundaries). Reviewer independently reproduced.
+
+**Outstanding (credential-gated, dev/staging Supabase only — never production):** apply migrations (`corepack pnpm prisma migrate dev`), run Playwright board E2E (`e2e/board.spec.ts`) + unauthenticated RLS-denial (`e2e/tasks-rls.spec.ts`) after setting `.env.local` + E2E account vars.
+
+**Reports:** `progress/impl_03_task_board_core.md`, `progress/review_03_task_board_core.md`.
+
+---
