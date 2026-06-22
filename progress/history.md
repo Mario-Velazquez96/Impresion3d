@@ -33,3 +33,19 @@
 **Reports:** `progress/impl_01_auth_and_user_management.md`, `progress/review_01_auth_and_user_management.md`.
 
 ---
+
+## 02_catalog_management — DONE (2026-06-22)
+
+**Feature:** Manageable catalogs (Color, PrintType, SupplyType, TaskCategory) as tables, Admin-only CRUD with RLS, idempotent seed, delete-guard. Spec approved by human (delete strategy = hard `Restrict` + in-use pre-check); implemented and reviewer-APPROVED.
+
+**Delivered:** Four catalog models (`name @unique`; Color adds `hex`) + migration; raw-SQL RLS per table (authenticated SELECT, admin-only writes via shared `is_admin()`); idempotent `prisma/seed.ts` (6 colors+hex, 4 task categories, 3 print types, upsert keyed on name); Zod `colorSchema` (hex regex) + `nameOnlySchema`; generic `lib/services/catalogs.ts` (CRUD + forward-pluggable `isCatalogValueInUse` registry for future FKs); `actions/catalogs.ts` (requireAdmin first, P2002→field error, delete-guard with P2003 backstop); `admin/catalogs` page + native-ARIA `CatalogTabs` + `CatalogTable` with color swatch. No new runtime deps.
+
+**Requirements:** R1–R8 all satisfied and traced to tests.
+
+**Verification:** Credential-free pipeline green — typecheck 0 errors, lint 0, Vitest 121 tests/15 files (catalog services + schemas ~100% coverage), build OK. Reviewer independently reproduced; all four implementer deviations (admin route under `app/admin/`, native ARIA tabs, `node prisma/seed.ts` via `PRISMA_SEED_RUN`, Prisma 6 seed-config deprecation) judged acceptable.
+
+**Outstanding (credential-gated, dev/staging Supabase only — never production):** apply migrations (`corepack pnpm prisma migrate deploy`), run seed (`corepack pnpm prisma db seed`), run Playwright E2E (`e2e/catalogs.spec.ts`) + RLS-denial (`e2e/catalogs-rls.spec.ts`) after setting `.env.local` + E2E account vars.
+
+**Reports:** `progress/impl_02_catalog_management.md`, `progress/review_02_catalog_management.md`.
+
+---

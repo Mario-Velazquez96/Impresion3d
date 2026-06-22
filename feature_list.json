@@ -19,14 +19,14 @@
       "name": "02_catalog_management",
       "description": "Manageable catalogs as tables (not enums): Color(name + hex), PrintType, SupplyType, TaskCategory with RLS, a seed for the 6 initial colors and initial task categories/print types, and Admin-only CRUD UI with a delete-guard for catalog values already in use.",
       "sdd": true,
-      "status": "spec_ready",
+      "status": "done",
       "depends_on": ["01_auth_and_user_management"]
     },
     {
       "name": "03_task_board_core",
       "description": "Task + Subtask models with RLS, CRUD server actions (auth + Zod), a statically-rendered Kanban board across the 6 states with task cards and subtask check-off, and server-side filtering by owner, category, and state. No drag-and-drop yet.",
       "sdd": true,
-      "status": "spec_ready",
+      "status": "in_progress",
       "depends_on": ["02_catalog_management"]
     },
     {

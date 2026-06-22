@@ -29,3 +29,43 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+// ── Catalogs (02_catalog_management) ─────────────────────────────────────────
+// Four near-identical reference tables that domain features reference (tasks,
+// expenses, prints). Stored as tables — not Prisma enums — so admins can edit
+// values without a code change/migration. `name` is unique per catalog so a
+// duplicate insert/update raises Prisma P2002 (mapped to a field error). Colors
+// additionally carry a `hex` (#RRGGBB) swatch for the planning filters.
+//
+// Referencing FKs in later features (03/05/06/07) MUST set `onDelete: Restrict`
+// so an in-use value cannot be deleted; the catalog delete path also runs a
+// friendly `isCatalogValueInUse` pre-check before attempting the delete.
+
+model Color {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  hex       String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PrintType {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SupplyType {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model TaskCategory {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

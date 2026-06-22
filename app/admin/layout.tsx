@@ -51,6 +51,12 @@ export default async function AdminLayout({
           >
             Users
           </Link>
+          <Link
+            href="/admin/catalogs"
+            className="text-sm text-muted-foreground hover:text-foreground"
+          >
+            Catalogs
+          </Link>
         </nav>
         <div className="flex items-center gap-3">
           <span className="text-sm text-muted-foreground">{adminEmail}</span>
