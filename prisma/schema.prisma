@@ -1,0 +1,31 @@
+// Prisma schema for Tower Layers.
+// Feature 00_project_setup shipped the datasource + generator only.
+// Feature 01_auth_and_user_management adds the Role enum + User model below.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // pooled, pgBouncer port 6543 (app runtime)
+  directUrl = env("DIRECT_URL") // direct, port 5432 (prisma migrate)
+}
+
+enum Role {
+  ADMIN
+  EMPLOYEE
+}
+
+// One row per authenticated Supabase user. `id` mirrors `auth.users.id` so the
+// app's authorization layer and Supabase Auth stay in sync. Rows are created
+// server-side (first login via ensureUserRow; invites via the Admin API), never
+// from the client — see the RLS migration which forbids client INSERT/DELETE.
+model User {
+  id        String   @id // = auth.users.id (Supabase UUID)
+  email     String   @unique
+  name      String
+  role      Role     @default(EMPLOYEE)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

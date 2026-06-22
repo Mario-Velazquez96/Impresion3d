@@ -5,14 +5,14 @@
       "name": "00_project_setup",
       "description": "Bootstrap the Next.js (App Router, TypeScript) app: pnpm, Tailwind + shadcn/ui, Prisma wired to the hosted Supabase Postgres (DATABASE_URL pooled + DIRECT_URL), @supabase/ssr clients (browser + server) and auth middleware, dnd-kit installed, Vitest + Playwright configured, ESLint/Prettier, .env.example, and Vercel project settings. Foundation for everything.",
       "sdd": true,
-      "status": "spec_ready",
+      "status": "done",
       "depends_on": []
     },
     {
       "name": "01_auth_and_user_management",
       "description": "Authentication and roles: User/Role(ADMIN|EMPLOYEE) Prisma model synced to Supabase auth, RLS, email/password login page, middleware-driven route protection, lib/auth.ts (requireUser/requireAdmin), and an Admin-only user management UI (invite + role edit).",
       "sdd": true,
-      "status": "spec_ready",
+      "status": "done",
       "depends_on": ["00_project_setup"]
     },
     {

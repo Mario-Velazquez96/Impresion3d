@@ -21,12 +21,15 @@ modeled from day one even though both launch users are Admins (brief §3 note).
 - `app/(auth)/login` email/password sign-in and sign-out.
 - `middleware.ts`-backed route protection for the `(app)` group.
 - `lib/auth.ts`: `getCurrentUser()`, `requireUser()`, `requireAdmin()`.
-- Admin-only user management UI: list users, invite a user, change a user's role.
+- Admin-only user management UI: list users, invite a user (with an admin-entered
+  temporary password), change a user's role.
 
 ## Out of scope
 
 - Catalog/task/expense/inventory/planning data — later features.
 - Password reset / email templates beyond Supabase defaults (future).
+- Forcing or prompting the invited user to change the temporary password after
+  first login (future).
 
 ## Requirements (EARS)
 
@@ -54,9 +57,18 @@ be `ADMIN`, otherwise `EMPLOYEE`.
 authenticated `User` or rejects) and `requireAdmin()` (rejects non-admins), built
 on `supabase.auth.getUser()`.
 
-**R8 (Event-driven):** When an Admin submits the invite-user form, the system
-shall validate it with `inviteUserSchema`, create the auth user via the Supabase
-Admin API (secret key, server-only), and create the matching `User` row.
+**R8 (Event-driven):** When an Admin submits the invite-user form (email, name,
+role, and an admin-entered temporary password), the system shall validate it with
+`inviteUserSchema`, create the auth user via the Supabase Admin API
+(`createUser`, secret key, server-only) with that password set and the email
+auto-confirmed (`email_confirm: true`) so the user can sign in immediately with
+the temporary password, and then create the matching `User` row. Prompting the
+user to change the temporary password after first login is out of scope for this
+feature.
+
+**R8a (Unwanted behavior):** If the invite-user form's temporary password is
+shorter than 6 characters, then `inviteUserSchema` shall reject the submission and
+the system shall create no auth user and no `User` row.
 
 **R9 (Unwanted behavior):** If a non-admin invokes any user-management action
 (`inviteUser`, `setUserRole`), then the system shall reject it without a DB write.
@@ -69,14 +81,15 @@ system shall persist the new `role` and revalidate the users page.
 - Visiting `/board` while signed out redirects to `/login`; signing in lands on
   `/board`; sign-out clears the session.
 - The first authenticated user is `ADMIN`; subsequent ones default `EMPLOYEE`.
-- An Admin can invite a user and change a role; an Employee cannot reach
-  `/admin/users` and the actions reject for non-admins.
+- An Admin can invite a user by supplying a temporary password; the invited user
+  can sign in immediately with that password. An Admin can change a role; an
+  Employee cannot reach `/admin/users` and the actions reject for non-admins.
+- A temporary password shorter than 6 characters is rejected with no auth user or
+  `User` row created.
 - RLS denies an Employee reading another user's row or editing roles.
 - Login form is keyboard-operable with labeled fields and an error region.
 
 ## Open items
 
-- Confirm the operational Employee permission default (resolved in design §6 role
-  matrix) at this gate — it shapes `requireAdmin` call sites in later features.
-- Invite flow: Supabase invite email vs admin-set temporary password — default to
-  Supabase invite email.
+- None. (Invite delivery method and the Employee permission default were resolved
+  at the approval gate — see design §6 and the invite flow in design.)
