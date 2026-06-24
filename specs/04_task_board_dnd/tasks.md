@@ -2,17 +2,17 @@
 
 > Each task cites the requirement(s) it satisfies. Mark `[x]` as completed.
 
-- [ ] Add `reorderTaskSchema` Zod schema (R5)
-- [ ] Implement `reorderTask` service: transactional state change + contiguous renumber of source/dest columns (idempotent) (R3)
-- [ ] Implement `reorderTask` server action with `requireUser` + zod (R1, R2, R5)
-- [ ] Build `KanbanBoard` client island: DndContext, Pointer + Keyboard sensors, SortableContext per column, DragOverlay (R1, R2, R6, R7)
-- [ ] Make `BoardColumn` a droppable; wrap cards in `SortableTaskCard` (R1, R2)
-- [ ] Swap `board/page.tsx` to render `<KanbanBoard initial={grouped} />` (no server fetch change) (R8)
-- [ ] Implement optimistic update + snapshot rollback + error toast on action failure (R4)
-- [ ] Add ARIA announcements for pick-up/move/drop (R6)
-- [ ] Write tests: Vitest (renumber/insert, idempotency, clamp); component (drop→optimistic+action, reject→rollback+toast, keyboard path); E2E (cross-column + within-column persist on reload) (all R)
-- [ ] Write the auth denial test: unauthenticated `reorderTask` rejected, no write (R5)
-- [ ] Verify build + typecheck + lint pass; confirm coverage target
+- [x] Add `reorderTaskSchema` Zod schema (R5)
+- [x] Implement `reorderTask` service: transactional state change + contiguous renumber of source/dest columns (idempotent) (R3)
+- [x] Implement `reorderTask` server action with `requireUser` + zod (R1, R2, R5)
+- [x] Build `KanbanBoard` client island: DndContext, Pointer + Keyboard sensors, SortableContext per column, DragOverlay (R1, R2, R6, R7)
+- [x] Make `BoardColumn` a droppable; wrap cards in `SortableTaskCard` (R1, R2)
+- [x] Swap `board/page.tsx` to render `<KanbanBoard initial={grouped} />` (no server fetch change) (R8)
+- [x] Implement optimistic update + snapshot rollback + error toast on action failure (R4)
+- [x] Add ARIA announcements for pick-up/move/drop (R6)
+- [x] Write tests: Vitest (renumber/insert, idempotency, clamp); component (drop→optimistic+action, reject→rollback+toast, keyboard path); E2E (cross-column + within-column persist on reload) (all R)
+- [x] Write the auth denial test: unauthenticated `reorderTask` rejected, no write (R5)
+- [x] Verify build + typecheck + lint pass; confirm coverage target
 
 ## Verification
 

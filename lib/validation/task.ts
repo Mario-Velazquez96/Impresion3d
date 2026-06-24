@@ -101,6 +101,18 @@ export const toggleSchema = z.object({
 });
 export type ToggleInput = z.infer<typeof toggleSchema>;
 
+// Reorder a task via drag-and-drop (04_task_board_dnd). The KanbanBoard island
+// posts the moved task id, its destination column (state), and the 0-based index
+// it was dropped at within that column. toIndex is a non-negative integer; the
+// service clamps an out-of-range index to the column's bounds (R3). Importable
+// from the client island so the optimistic layer and the action share one shape.
+export const reorderTaskSchema = z.object({
+  taskId: idSchema,
+  toState: taskStateSchema,
+  toIndex: z.number().int().min(0),
+});
+export type ReorderTaskInput = z.infer<typeof reorderTaskSchema>;
+
 // Filters parsed from the board's URL search params (R7). Each is optional;
 // blank/"none" normalizes to undefined so an absent param means "no filter".
 export const taskFiltersSchema = z.object({

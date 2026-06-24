@@ -35,8 +35,10 @@ function makeTask(partial: Partial<TaskCardView> = {}): TaskCardView {
 // <option> labels.
 function badgeRow(): HTMLElement {
   const heading = screen.getByRole("heading", { name: "Order spool" });
-  const card = heading.closest("li")!;
-  // The badge row is the div containing the category badge.
+  // The card root is the nearest bordered card container; the badge row is its
+  // flex-wrap div. (04 changed the card root from <li> to <div> so a sortable
+  // wrapper can own the list-item semantics.)
+  const card = heading.closest("div.rounded-md")!;
   return card.querySelector<HTMLElement>("div.flex-wrap")!;
 }
 

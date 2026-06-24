@@ -8,11 +8,13 @@ import {
   createTask,
   deleteTask,
   removeSubtask,
+  reorderTask,
   toggleSubtask,
   updateTask,
 } from "@/lib/services/tasks";
 import {
   createTaskSchema,
+  reorderTaskSchema,
   subtaskSchema,
   toggleSchema,
   updateTaskSchema,
@@ -208,6 +210,37 @@ export async function toggleSubtaskAction(
     await toggleSubtask(parsed.data);
   } catch {
     return { ok: false, error: "Failed to update subtask" };
+  }
+
+  revalidatePath(BOARD_PATH);
+  return { ok: true };
+}
+
+/**
+ * Persist a drag-and-drop reorder (04: R1, R2, R5). Unlike the form actions this
+ * takes the typed payload directly (the KanbanBoard island calls it with an
+ * object, not FormData):
+ *   1. requireUser() FIRST — an unauthenticated caller is rejected before any
+ *      validation or DB work, so nothing is written (R5).
+ *   2. Zod-validate { taskId, toState, toIndex }.
+ *   3. Call the transactional reorderTask service (R3).
+ *   4. revalidatePath('/board') so the server truth reconciles the optimistic UI.
+ * A bad taskId surfaces as Prisma P2025 (record not found) → generic failure,
+ * which the client maps to a rollback + toast (R4).
+ */
+export async function reorderTaskAction(
+  input: unknown,
+): Promise<TaskActionResult> {
+  const denied = await ensureUser();
+  if (denied) return denied;
+
+  const parsed = reorderTaskSchema.safeParse(input);
+  if (!parsed.success) return zodFailure(parsed.error.issues);
+
+  try {
+    await reorderTask(parsed.data);
+  } catch {
+    return { ok: false, error: "Failed to reorder task" };
   }
 
   revalidatePath(BOARD_PATH);

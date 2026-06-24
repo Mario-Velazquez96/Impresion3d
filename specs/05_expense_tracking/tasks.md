@@ -2,15 +2,15 @@
 
 > Each task cites the requirement(s) it satisfies. Mark `[x]` as completed.
 
-- [ ] Add `Expense` model (Decimal cost, date, purchaseUrl, supplyType Restrict); `prisma migrate dev --name expenses` (R1)
-- [ ] Write RLS SQL migration on `Expense` (authenticated read/write) (R2)
-- [ ] Add Zod `createExpenseSchema` (+positive 2-dp cost, URL, required supplyType) and `updateExpenseSchema` (R3, R8, R9)
-- [ ] Implement `lib/services/expenses.ts` (list desc by date, create/update/delete, Decimal handling) (R3–R6)
-- [ ] Implement `actions/expenses.ts` (requireUser create/edit; requireAdmin delete) + revalidate (R3–R5, R7)
-- [ ] Build `expenses/page.tsx` + `<ExpensesTable>` (formatted) + `<ExpenseFormDialog>` (R6)
-- [ ] Write tests: Vitest (schema cost/URL/required, Decimal round-trip); component (form create+edit); E2E (record→list, edit, admin delete, employee delete blocked) (all R)
-- [ ] Write the RLS denial test: unauthenticated cannot read/write expenses (R2)
-- [ ] Verify build + typecheck + lint pass; confirm coverage target
+- [x] Add `Expense` model (Decimal cost, date, purchaseUrl, supplyType Restrict); `prisma migrate dev --name expenses` (R1)
+- [x] Write RLS SQL migration on `Expense` (authenticated read/write) (R2)
+- [x] Add Zod `createExpenseSchema` (+positive 2-dp cost, URL, required supplyType) and `updateExpenseSchema` (R3, R8, R9)
+- [x] Implement `lib/services/expenses.ts` (list desc by date, create/update/delete, Decimal handling) (R3–R6)
+- [x] Implement `actions/expenses.ts` (requireUser create/edit; requireAdmin delete) + revalidate (R3–R5, R7)
+- [x] Build `expenses/page.tsx` + `<ExpensesTable>` (formatted) + `<ExpenseFormDialog>` (R6)
+- [x] Write tests: Vitest (schema cost/URL/required, Decimal round-trip); component (form create+edit); E2E (record→list, edit, admin delete, employee delete blocked) (all R)
+- [x] Write the RLS denial test: unauthenticated cannot read/write expenses (R2)
+- [x] Verify build + typecheck + lint pass; confirm coverage target
 
 ## Verification
 

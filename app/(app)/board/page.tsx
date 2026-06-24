@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 
-import { BoardColumns } from "@/components/board/BoardColumns";
+import { KanbanBoard } from "@/components/board/KanbanBoard";
 import { TaskFilters } from "@/components/board/TaskFilters";
 import { TaskFormDialog } from "@/components/board/TaskFormDialog";
 import type { TaskCardView } from "@/components/board/TaskCard";
+import { ToastProvider } from "@/components/ui/toast";
 import { requireUser } from "@/lib/auth";
 import { listCatalog } from "@/lib/services/catalogs";
 import { listTasks } from "@/lib/services/tasks";
@@ -78,11 +79,13 @@ export default async function BoardPage({
 
       <TaskFilters categories={categoryOptions} users={userOptions} />
 
-      <BoardColumns
-        tasks={cards}
-        categories={categoryOptions}
-        users={userOptions}
-      />
+      <ToastProvider>
+        <KanbanBoard
+          initial={cards}
+          categories={categoryOptions}
+          users={userOptions}
+        />
+      </ToastProvider>
     </div>
   );
 }

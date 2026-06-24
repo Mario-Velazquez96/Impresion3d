@@ -32,6 +32,10 @@ model User {
   // 03_task_board_core: tasks assigned to this user. The FK on Task uses
   // onDelete: SetNull, so deleting a user unassigns (never deletes) their tasks.
   assignedTasks Task[] @relation("AssignedTasks")
+
+  // 07_weekly_planning: week plans this user created. The FK on WeekPlan uses
+  // onDelete: Restrict, so a user who has authored a week plan cannot be deleted.
+  weekPlans WeekPlan[]
 }
 
 // ── Catalogs (02_catalog_management) ─────────────────────────────────────────
@@ -51,6 +55,16 @@ model Color {
   hex       String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // 06_print_inventory: PrintColor join rows that reference this color. The FK on
+  // PrintColor uses onDelete: Restrict, so a color in use by any print cannot be
+  // deleted (the prints service also registers a catalog delete-guard counter).
+  prints PrintColor[]
+
+  // 07_weekly_planning: WeekPlanColor rows that mark this color as available for a
+  // week. The FK on WeekPlanColor uses onDelete: Restrict, so a color used in any
+  // week plan cannot be deleted.
+  weekPlanColors WeekPlanColor[]
 }
 
 model PrintType {
@@ -58,6 +72,11 @@ model PrintType {
   name      String   @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // 06_print_inventory: prints of this type. The FK on Print uses
+  // onDelete: Restrict, so an in-use print type cannot be deleted (the prints
+  // service also registers a catalog delete-guard counter).
+  prints Print[]
 }
 
 model SupplyType {
@@ -65,6 +84,10 @@ model SupplyType {
   name      String   @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // 05_expense_tracking: expenses that reference this supply type. The FK on
+  // Expense uses onDelete: Restrict, so an in-use SupplyType cannot be deleted.
+  expenses Expense[]
 }
 
 model TaskCategory {
@@ -129,4 +152,142 @@ model Subtask {
   position Int
 
   @@index([taskId, position])
+}
+
+// ── Expense tracking (05_expense_tracking) ───────────────────────────────────
+// A recorded supply expense: cost, reason, date, optional purchase link, and the
+// SupplyType (catalog) it belongs to. `cost` is a Decimal(10,2) — never a JS
+// float — so amounts round-trip with exact two-decimal precision. The supplyType
+// FK uses onDelete: Restrict (an in-use SupplyType can't be deleted; the service
+// also registers a catalog delete-guard counter). Indexed by `date` (list order /
+// future per-month reports) and `supplyTypeId` (future per-type reports). RLS lets
+// any authenticated user read/write; delete is gated to Admins in the app layer.
+model Expense {
+  id           String     @id @default(cuid())
+  cost         Decimal    @db.Decimal(10, 2)
+  reason       String
+  date         DateTime
+  purchaseUrl  String?
+  supplyType   SupplyType @relation(fields: [supplyTypeId], references: [id], onDelete: Restrict)
+  supplyTypeId String
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([date])
+  @@index([supplyTypeId])
+}
+
+// ── Print inventory (06_print_inventory) ─────────────────────────────────────
+// A print the business can produce: identity (name) plus the data that drives
+// color-based planning — the colors it uses (M2M via PrintColor), print time,
+// filament grams, a private-bucket photo (photoPath = Storage object key, never a
+// public URL), an optional document link, and a PrintType. The printType FK uses
+// onDelete: Restrict (an in-use print type can't be deleted; the prints service
+// also registers a catalog delete-guard counter). Indexed by printTypeId (the
+// type filter) and name (the search filter). RLS lets any authenticated user
+// read/write; delete is gated to Admins in the app layer. The weekItems relation
+// arrives with 07_weekly_planning.
+model Print {
+  id               String       @id @default(cuid())
+  name             String
+  printTimeMinutes Int
+  filamentGrams    Int
+  photoPath        String? // Storage object key in the private print-photos bucket
+  documentUrl      String?
+  printType        PrintType    @relation(fields: [printTypeId], references: [id], onDelete: Restrict)
+  printTypeId      String
+  colors           PrintColor[]
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  // 07_weekly_planning: WeekPlanItem rows that assign this print to a day. The FK
+  // on WeekPlanItem uses onDelete: Restrict, so a print planned in any week cannot
+  // be deleted (the back-relation 06 deferred, added now).
+  weekItems WeekPlanItem[]
+
+  @@index([printTypeId])
+  @@index([name])
+}
+
+// The colors a print uses (M2M join). Composite PK (printId, colorId) makes each
+// (print, color) pair unique. The print FK cascades (deleting a print removes its
+// color rows); the color FK is Restrict (a color in use cannot be deleted). The
+// color set is replaced atomically on edit (deleteMany + createMany in a
+// transaction).
+model PrintColor {
+  print   Print  @relation(fields: [printId], references: [id], onDelete: Cascade)
+  printId String
+  color   Color  @relation(fields: [colorId], references: [id], onDelete: Restrict)
+  colorId String
+
+  @@id([printId, colorId])
+  @@index([colorId])
+}
+
+// ── Weekly planning (07_weekly_planning) ─────────────────────────────────────
+// The portal's central tool. Because filament must be DRIED the day before use,
+// the user picks the colors to dry for a week, the inventory filters to the
+// prints producible with those colors (full / partial match — a pure service in
+// lib/services/planning.ts), and prints are assigned to days. "Dry the day
+// before" is DERIVED at render (dryingSchedule), never stored.
+//
+// One WeekPlan per Monday (weekStartDate is always snapped to the Monday and is
+// @unique). WeekPlanColor is the week's available-color set (replaced atomically
+// on edit, like PrintColor). WeekPlanItem assigns a print to a day with an integer
+// position within that (week, day). RLS lets any authenticated user read/write the
+// shared plan (no per-row ownership); the server layer requires a signed-in user.
+
+// The seven weekdays a print can be planned on. A Prisma enum (fixed, code-level
+// set) — part of the planner's contract, never admin-editable. MON starts the week.
+enum Weekday {
+  MON
+  TUE
+  WED
+  THU
+  FRI
+  SAT
+  SUN
+}
+
+model WeekPlan {
+  id            String          @id @default(cuid())
+  weekStartDate DateTime        @unique // the Monday of the week (snapped on input)
+  createdBy     User            @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  createdById   String
+  colors        WeekPlanColor[]
+  items         WeekPlanItem[]
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+// The colors available (to be dried) for a week. Composite PK (weekPlanId, colorId)
+// makes each (week, color) pair unique. The weekPlan FK cascades (deleting a plan
+// removes its color rows); the color FK is Restrict (a color used by any plan
+// cannot be deleted). The set is replaced atomically on edit (deleteMany +
+// createMany in a transaction).
+model WeekPlanColor {
+  weekPlan   WeekPlan @relation(fields: [weekPlanId], references: [id], onDelete: Cascade)
+  weekPlanId String
+  color      Color    @relation(fields: [colorId], references: [id], onDelete: Restrict)
+  colorId    String
+
+  @@id([weekPlanId, colorId])
+  @@index([colorId])
+}
+
+// A print assigned to a day of a week. The weekPlan FK cascades (deleting a plan
+// removes its items); the print FK is Restrict (a planned print cannot be deleted).
+// `position` is an integer rank within a (weekPlan, dayOfWeek) column, assigned at
+// the end of the day's order on create. Indexed by (weekPlanId, dayOfWeek, position)
+// for the per-day ordered read.
+model WeekPlanItem {
+  id         String   @id @default(cuid())
+  weekPlan   WeekPlan @relation(fields: [weekPlanId], references: [id], onDelete: Cascade)
+  weekPlanId String
+  print      Print    @relation(fields: [printId], references: [id], onDelete: Restrict)
+  printId    String
+  dayOfWeek  Weekday
+  position   Int
+
+  @@index([weekPlanId, dayOfWeek, position])
 }

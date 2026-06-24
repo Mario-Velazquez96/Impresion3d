@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { registerCatalogReference } from "@/lib/services/catalogs";
 import type {
   CreateTaskInput,
+  ReorderTaskInput,
   SubtaskInput,
   TaskFilters,
   TaskState,
@@ -188,4 +189,124 @@ export async function toggleSubtask(input: ToggleInput) {
 /** Remove a subtask. */
 export async function removeSubtask(subtaskId: string) {
   return db.subtask.delete({ where: { id: subtaskId } });
+}
+
+// --- 04_task_board_dnd: drag reorder ---------------------------------------
+
+/** A task id paired with its current position, as read for a renumber. */
+export type OrderedTaskRef = { id: string; position: number };
+
+/** The final position a single task should be written to after a renumber. */
+export type PositionAssignment = { id: string; position: number };
+
+/**
+ * Pure ordering core for `reorderTask` (R3). Given the destination column's
+ * current members (ordered by position), the moved task id, and the requested
+ * drop index, return contiguous `0..n-1` assignments with the moved task placed
+ * at the clamped index.
+ *
+ * Properties (covered by unit tests):
+ * - Output positions are always contiguous `0..n-1` (no gaps/drift).
+ * - `toIndex` is clamped to `[0, n-1]` so an out-of-range index is valid.
+ * - Idempotent: re-running with the moved task already at the resulting index
+ *   yields the same order.
+ *
+ * `destExisting` must already exclude the moved task when it is arriving from a
+ * different column; when reordering within a column it may still contain the
+ * moved task — it is filtered out here before re-insertion, so both callers are
+ * handled uniformly.
+ */
+export function renumberColumnWithInsert(
+  destExisting: OrderedTaskRef[],
+  movedId: string,
+  toIndex: number,
+): PositionAssignment[] {
+  const without = destExisting
+    .filter((t) => t.id !== movedId)
+    .sort((a, b) => a.position - b.position)
+    .map((t) => t.id);
+
+  const clamped = Math.max(0, Math.min(toIndex, without.length));
+  const ordered = [
+    ...without.slice(0, clamped),
+    movedId,
+    ...without.slice(clamped),
+  ];
+
+  return ordered.map((id, index) => ({ id, position: index }));
+}
+
+/**
+ * Renumber a list of tasks (a source column losing a member) to contiguous
+ * `0..n-1` by current order, excluding the moved task. Pure; used for the source
+ * column on a cross-column move.
+ */
+export function renumberColumn(
+  existing: OrderedTaskRef[],
+  excludeId: string,
+): PositionAssignment[] {
+  return existing
+    .filter((t) => t.id !== excludeId)
+    .sort((a, b) => a.position - b.position)
+    .map((t, index) => ({ id: t.id, position: index }));
+}
+
+/**
+ * Persist a drag reorder (R1, R2, R3). In a single transaction:
+ *   1. Read the moved task to learn its source state.
+ *   2. Set its `state = toState`.
+ *   3. Renumber the destination column to contiguous positions with the moved
+ *      task inserted at the clamped `toIndex`.
+ *   4. If the move crossed columns, also renumber the (now smaller) source
+ *      column to contiguous positions.
+ * Positions never drift or gap, and replaying the same target is idempotent.
+ * Authorization is the caller's job (actions/tasks.ts via requireUser, R5).
+ * A bad taskId surfaces as Prisma P2025 (record not found) from the initial read.
+ */
+export async function reorderTask(input: ReorderTaskInput): Promise<void> {
+  const { taskId, toState, toIndex } = input;
+
+  await db.$transaction(async (tx) => {
+    const moved = await tx.task.findUniqueOrThrow({
+      where: { id: taskId },
+      select: { id: true, state: true },
+    });
+    const fromState = moved.state as TaskState;
+
+    // Move the task into the destination column first so the destination read
+    // below includes it (within-column reorders) and the source read excludes it.
+    if (fromState !== toState) {
+      await tx.task.update({
+        where: { id: taskId },
+        data: { state: toState },
+      });
+    }
+
+    const destExisting = await tx.task.findMany({
+      where: { state: toState },
+      orderBy: { position: "asc" },
+      select: { id: true, position: true },
+    });
+
+    const destAssignments = renumberColumnWithInsert(
+      destExisting,
+      taskId,
+      toIndex,
+    );
+    for (const { id, position } of destAssignments) {
+      await tx.task.update({ where: { id }, data: { position } });
+    }
+
+    if (fromState !== toState) {
+      const sourceExisting = await tx.task.findMany({
+        where: { state: fromState },
+        orderBy: { position: "asc" },
+        select: { id: true, position: true },
+      });
+      const sourceAssignments = renumberColumn(sourceExisting, taskId);
+      for (const { id, position } of sourceAssignments) {
+        await tx.task.update({ where: { id }, data: { position } });
+      }
+    }
+  });
 }

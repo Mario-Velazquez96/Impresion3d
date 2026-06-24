@@ -26,6 +26,24 @@ export default async function AppLayout({
           <Link href="/board" className="text-sm font-semibold">
             Tower Layers
           </Link>
+          <Link
+            href="/inventory"
+            className="text-sm text-muted-foreground hover:text-foreground"
+          >
+            Inventory
+          </Link>
+          <Link
+            href="/planning"
+            className="text-sm text-muted-foreground hover:text-foreground"
+          >
+            Planning
+          </Link>
+          <Link
+            href="/expenses"
+            className="text-sm text-muted-foreground hover:text-foreground"
+          >
+            Expenses
+          </Link>
           {user.role === "ADMIN" ? (
             <Link
               href="/admin/users"

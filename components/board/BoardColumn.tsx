@@ -47,12 +47,9 @@ export function BoardColumn({
       ) : (
         <ul className="flex flex-col gap-2">
           {tasks.map((task) => (
-            <TaskCard
-              key={task.id}
-              task={task}
-              categories={categories}
-              users={users}
-            />
+            <li key={task.id}>
+              <TaskCard task={task} categories={categories} users={users} />
+            </li>
           ))}
         </ul>
       )}

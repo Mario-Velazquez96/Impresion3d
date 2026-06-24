@@ -1,3 +1,5 @@
+import type { DraggableAttributes } from "@dnd-kit/core";
+
 import { SubtaskList } from "@/components/board/SubtaskList";
 import { TaskFormDialog } from "@/components/board/TaskFormDialog";
 import type {
@@ -35,14 +37,36 @@ function formatDate(iso: string): string {
   });
 }
 
+/**
+ * Optional drag affordances supplied by 04's SortableTaskCard. When present, a
+ * dedicated drag-handle button is rendered (carrying the dnd-kit listeners) so
+ * the rest of the card — the Edit dialog, subtask checkboxes — stays clickable
+ * and keyboard-focusable. Absent (e.g. the static 03 tests, or the DragOverlay
+ * preview) the card renders exactly as before.
+ */
+// dnd-kit's useSortable listeners map (handlers keyed by event name). The
+// package does not re-export the named type from its root, so we describe the
+// shape we actually spread onto the handle button.
+export type DragListeners = Record<
+  string,
+  (event: React.SyntheticEvent) => void
+>;
+
+export type TaskCardDrag = {
+  attributes?: Partial<DraggableAttributes>;
+  listeners?: DragListeners;
+};
+
 export function TaskCard({
   task,
   categories,
   users,
+  drag,
 }: {
   task: TaskCardView;
   categories: CategoryOption[];
   users: UserOption[];
+  drag?: TaskCardDrag;
 }) {
   const category = categories.find((c) => c.id === task.categoryId);
   const assignee = task.assigneeId
@@ -51,9 +75,24 @@ export function TaskCard({
   const doneCount = task.subtasks.filter((s) => s.done).length;
 
   return (
-    <li className="rounded-md border bg-card p-3 text-card-foreground shadow-sm">
+    <div className="rounded-md border bg-card p-3 text-card-foreground shadow-sm">
       <div className="flex items-start justify-between gap-2">
-        <h3 className="text-sm font-medium leading-snug">{task.title}</h3>
+        <div className="flex min-w-0 items-start gap-1.5">
+          {drag ? (
+            <button
+              type="button"
+              aria-label={`Drag ${task.title}`}
+              className="mt-0.5 cursor-grab touch-none rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
+              {...drag.attributes}
+              {...drag.listeners}
+            >
+              ⠿
+            </button>
+          ) : null}
+          <h3 className="truncate text-sm font-medium leading-snug">
+            {task.title}
+          </h3>
+        </div>
         <TaskFormDialog
           mode="edit"
           categories={categories}
@@ -98,6 +137,6 @@ export function TaskCard({
       </div>
 
       <SubtaskList taskId={task.id} subtasks={task.subtasks} />
-    </li>
+    </div>
   );
 }

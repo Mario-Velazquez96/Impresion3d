@@ -33,28 +33,28 @@
       "name": "04_task_board_dnd",
       "description": "Add dnd-kit interactivity to the board: drag tasks between state columns and reorder within a column, persisting state + integer position via an idempotent server action, with optimistic update + rollback on failure and keyboard-accessible drag.",
       "sdd": true,
-      "status": "spec_ready",
+      "status": "done",
       "depends_on": ["03_task_board_core"]
     },
     {
       "name": "05_expense_tracking",
       "description": "Expense model (cost Decimal, reason, date, purchase link, supply type) with RLS, CRUD server actions, and a list + create/edit form. Data kept structured (date, supplyType) so future reports/totals need no remodel.",
       "sdd": true,
-      "status": "spec_ready",
+      "status": "done",
       "depends_on": ["02_catalog_management"]
     },
     {
       "name": "06_print_inventory",
       "description": "Print model with PrintColor many-to-many (colors used), structured printTimeMinutes/filamentGrams, print type, document link, and photo in a private Supabase Storage bucket (policies + signed-URL reads). RLS, CRUD server actions with image upload, and an inventory list with search/filter.",
       "sdd": true,
-      "status": "spec_ready",
+      "status": "done",
       "depends_on": ["02_catalog_management"]
     },
     {
       "name": "07_weekly_planning",
       "description": "Weekly planner: WeekPlan/WeekPlanColor/WeekPlanItem models with RLS, a color-match service (full match default + partial match showing missing colors), a color picker for the week, the filtered inventory, assigning prints to Monday-Sunday, and a derived 'dry the day before' indicator.",
       "sdd": true,
-      "status": "spec_ready",
+      "status": "done",
       "depends_on": ["06_print_inventory"]
     }
   ]
