@@ -2,16 +2,16 @@
 
 > Each task cites the requirement(s) it satisfies. Mark `[x]` as completed.
 
-- [ ] Add `TaskState` enum, `Task`, `Subtask` models; `prisma migrate dev --name tasks_and_subtasks` (R1, R2)
-- [ ] Write RLS SQL migration enabling RLS on `Task`/`Subtask` (authenticated-only) (R3)
-- [ ] Add Zod `createTaskSchema`, `updateTaskSchema`, `subtaskSchema`, `toggleSchema` (R4, R5, R6, R10)
-- [ ] Implement `lib/services/tasks.ts` (listTasks w/ filters, create w/ end position, update, delete, subtask add/toggle/remove) (R4–R8)
-- [ ] Implement `actions/tasks.ts` wrapping services with `requireUser` + zod + `revalidatePath('/board')` (R4–R6, R9)
-- [ ] Build `board/page.tsx` server fetch from searchParams → `<BoardColumns>` (6 columns, fixed order) (R7, R8)
-- [ ] Build `TaskCard`, `TaskFilters` (URL params), `TaskFormDialog`, `SubtaskList` (R4–R7)
-- [ ] Write tests: Vitest (filter composition, position calc, schemas, bad FK); component (form submit, subtask toggle, filter URL); E2E (create/edit/move-via-state, subtasks, filters) (all R)
-- [ ] Write the RLS denial test: unauthenticated cannot read/write tasks/subtasks (R3, R9)
-- [ ] Verify build + typecheck + lint pass; confirm coverage target
+- [x] Add `TaskState` enum, `Task`, `Subtask` models; `prisma migrate dev --name tasks_and_subtasks` (R1, R2)
+- [x] Write RLS SQL migration enabling RLS on `Task`/`Subtask` (authenticated-only) (R3)
+- [x] Add Zod `createTaskSchema`, `updateTaskSchema`, `subtaskSchema`, `toggleSchema` (R4, R5, R6, R10)
+- [x] Implement `lib/services/tasks.ts` (listTasks w/ filters, create w/ end position, update, delete, subtask add/toggle/remove) (R4–R8)
+- [x] Implement `actions/tasks.ts` wrapping services with `requireUser` + zod + `revalidatePath('/board')` (R4–R6, R9)
+- [x] Build `board/page.tsx` server fetch from searchParams → `<BoardColumns>` (6 columns, fixed order) (R7, R8)
+- [x] Build `TaskCard`, `TaskFilters` (URL params), `TaskFormDialog`, `SubtaskList` (R4–R7)
+- [x] Write tests: Vitest (filter composition, position calc, schemas, bad FK); component (form submit, subtask toggle, filter URL); E2E (create/edit/move-via-state, subtasks, filters) (all R)
+- [x] Write the RLS denial test: unauthenticated cannot read/write tasks/subtasks (R3, R9)
+- [x] Verify build + typecheck + lint pass; confirm coverage target
 
 ## Verification
 

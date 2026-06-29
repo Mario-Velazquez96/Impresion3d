@@ -52,8 +52,31 @@ actions/users.ts               # "use server": inviteUser, setUserRole, signOut
   (calling `ensureUserRow` to create on first login, R6). `requireAdmin()` builds
   on it.
 - First-user-is-admin (R6): in `ensureUserRow`, if `User` count is 0, set `ADMIN`.
-- `inviteUser` uses a Supabase **admin** client built with the **secret key**
-  (server-only) to create the auth user, then inserts the `User` row.
+
+## Invite flow (admin-set temporary password)
+
+Invite delivery is by **admin-entered temporary password**, not the Supabase
+invite email. We chose admin-entered over a system-generated secret because it
+keeps the flow simpler and avoids ever rendering a generated secret in the UI;
+the admin types a temporary password directly into the invite form and shares it
+out-of-band.
+
+`inviteUser` (server action → `services/users.ts`):
+
+1. `requireAdmin()` (R9).
+2. Validate input with `inviteUserSchema` (email, name, role, temporary
+   password) — reject before any external call if the password is too short
+   (R8a).
+3. Build a Supabase **admin** client with the **secret key** (server-only) and
+   call `admin.createUser({ email, password: tempPassword, email_confirm: true,
+   user_metadata: { name } })`. `email_confirm: true` lets the invited user sign
+   in immediately with the temporary password (R8).
+4. Insert the matching `User` row (`id` = the returned auth user id, `email`,
+   `name`, `role`) via Prisma.
+5. `revalidatePath('/admin/users')`.
+
+Prompting/forcing a password change after first login is explicitly **out of
+scope** for this feature (future item).
 
 ## Auth & security
 
@@ -63,26 +86,48 @@ actions/users.ts               # "use server": inviteUser, setUserRole, signOut
   calls `requireAdmin()`. Middleware keeps the session fresh.
 - All user-management actions call `requireAdmin()` first (R9).
 
+### Role matrix (resolved)
+
+Confirmed at the approval gate. There are exactly two roles:
+
+- **EMPLOYEE** — an authenticated app user with no admin privileges. Employees
+  can reach the `(app)` group (e.g. `/board`) but not `/admin/*`. This feature
+  grants Employees no write capabilities beyond their own session; later features
+  define their operational permissions, which by default require only
+  `requireUser()`.
+- **ADMIN** — everything an Employee can do, plus user management (invite users,
+  change roles) and any future admin-gated surface.
+
+The only admin-gated capability introduced in this feature is **user
+management**; all other authenticated surfaces gate on `requireUser()`. This
+default shapes `requireAdmin()` call sites in later features: gate on
+`requireAdmin()` only for admin-exclusive actions, otherwise `requireUser()`.
+
 ## Validation
 
 - `loginSchema` { email: email, password: min 6 }.
-- `inviteUserSchema` { email: email, name: min 1, role: enum }.
+- `inviteUserSchema` { email: email, name: min 1, role: enum, tempPassword:
+  min 6 } — `tempPassword` reuses `loginSchema`'s min-6 rule so an invited user's
+  temporary password always satisfies the login rule (R8a).
 - `setRoleSchema` { userId: cuid/uuid, role: enum }.
 
 ## Test approach
 
 - **Vitest:** `requireUser`/`requireAdmin` (authorized vs rejected), `ensureUserRow`
-  first-user-admin logic, Zod schemas.
-- **Component:** login form error state (R5); UsersTable role change calls action.
+  first-user-admin logic, Zod schemas — including `inviteUserSchema` accepting a
+  valid temp password and rejecting one shorter than 6 chars (R8a).
+- **Component:** login form error state (R5); UsersTable role change calls action;
+  invite dialog includes a temporary-password field.
 - **E2E (Playwright):** signed-out `/board` → `/login` (R3); login → `/board` (R4);
-  admin invites a user and changes a role (R8, R10); employee blocked from
-  `/admin/users` (R9).
+  admin invites a user by setting a temporary password, then the invited user
+  signs in with that temporary password (R8); admin changes a role (R10);
+  employee blocked from `/admin/users` (R9).
 - **RLS denial test:** an Employee identity cannot select another user's row or
   update a role (R2).
-- Coverage target: auth helpers + services 100% of branches; the four core E2E
+- Coverage target: auth helpers + services 100% of branches; the core E2E
   flows green.
 
 ## Open items / discrepancies
 
-- Invite delivery method (Supabase invite email vs temp password) — default invite
-  email; confirm at the gate.
+- None. Invite delivery (admin-set temporary password) and the Employee
+  permission default (above) were resolved at the approval gate.

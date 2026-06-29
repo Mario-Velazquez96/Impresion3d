@@ -1,0 +1,152 @@
+import { z } from "zod";
+
+/**
+ * Validation for the task board (03_task_board_core). This module is
+ * client-importable (no server-only imports) so the board form/filters can reuse
+ * the same shapes and error messages the server actions enforce.
+ */
+
+// Mirrors the Prisma `TaskState` enum. Declared here (rather than imported from
+// @prisma/client) so this module stays importable from client components and the
+// browser bundle without pulling in the server-only Prisma client. The array is
+// also the canonical column render order for the board (R8).
+export const TASK_STATES = [
+  "BACKLOG",
+  "TODO",
+  "IN_PROGRESS",
+  "PENDING",
+  "BLOCKER",
+  "DONE",
+] as const;
+
+export const taskStateSchema = z.enum(TASK_STATES);
+export type TaskState = z.infer<typeof taskStateSchema>;
+
+// Mirrors the Prisma `Priority` enum (08_task_priority). Declared here — like
+// TASK_STATES — so the client form/filters import the canonical set without
+// pulling in the server-only Prisma client. The array order is the form/filter
+// render order (Low → Medium → High).
+export const PRIORITIES = ["LOW", "MEDIUM", "HIGH"] as const;
+export const prioritySchema = z.enum(PRIORITIES);
+export type Priority = z.infer<typeof prioritySchema>;
+
+// A cuid foreign-key id. Non-empty string; existence is enforced by the DB FK
+// (a bad category/assignee raises Prisma P2003, which the action maps to a
+// validation error — R10).
+const idSchema = z.string().trim().min(1);
+
+// Optional id that also accepts "" / "none" from a <select> and normalizes those
+// (and a missing FormData value, which arrives as null) to undefined
+// (unassigned). Used for the optional assignee filter/field.
+const optionalAssigneeSchema = z
+  .union([z.literal(""), z.literal("none"), z.null(), idSchema])
+  .optional()
+  .transform((value) =>
+    value === "" || value === "none" || value === null ? undefined : value,
+  );
+
+// Optional due date from a date input. Accepts an ISO/`yyyy-mm-dd` string or a
+// Date; "", null, and a missing value normalize to undefined. Rejects
+// unparseable strings.
+const optionalDueDateSchema = z
+  .union([z.literal(""), z.null(), z.string(), z.date()])
+  .optional()
+  .transform((value, ctx) => {
+    if (value === undefined || value === "" || value === null) return undefined;
+    if (value instanceof Date) return value;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Enter a valid date",
+      });
+      return z.NEVER;
+    }
+    return parsed;
+  });
+
+// Optional free-text field from a form (textarea). "", null, and a missing value
+// normalize to undefined; otherwise trimmed.
+const optionalTextSchema = z
+  .union([z.literal(""), z.null(), z.string()])
+  .optional()
+  .transform((value) => {
+    if (value === undefined || value === null) return undefined;
+    const trimmed = value.trim();
+    return trimmed ? trimmed : undefined;
+  });
+
+// Create a task (R4). title is required; description/assignee/dueDate optional;
+// categoryId + state required. assignee/category existence is enforced by the FK
+// (R10).
+export const createTaskSchema = z.object({
+  title: z.string().trim().min(1, "Title is required"),
+  description: optionalTextSchema,
+  categoryId: idSchema,
+  state: taskStateSchema,
+  // Defaults to MEDIUM when the form omits it — absent (undefined), "" or null
+  // all normalize to MEDIUM (R2); an out-of-set value still fails validation
+  // (R6). Inherited by updateTaskSchema via .extend (R3).
+  priority: z
+    .union([z.literal(""), z.null(), prioritySchema])
+    .optional()
+    .transform((value) =>
+      value === "" || value === null || value === undefined
+        ? ("MEDIUM" as Priority)
+        : value,
+    ),
+  assigneeId: optionalAssigneeSchema,
+  dueDate: optionalDueDateSchema,
+});
+export type CreateTaskInput = z.infer<typeof createTaskSchema>;
+
+// Update a task (R5): the create shape plus the target task id.
+export const updateTaskSchema = createTaskSchema.extend({
+  id: idSchema,
+});
+export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
+
+// Add a subtask to a task (R6).
+export const subtaskSchema = z.object({
+  taskId: idSchema,
+  title: z.string().trim().min(1, "Title is required"),
+});
+export type SubtaskInput = z.infer<typeof subtaskSchema>;
+
+// Toggle a subtask's done state (R6).
+export const toggleSchema = z.object({
+  subtaskId: idSchema,
+  done: z.boolean(),
+});
+export type ToggleInput = z.infer<typeof toggleSchema>;
+
+// Reorder a task via drag-and-drop (04_task_board_dnd). The KanbanBoard island
+// posts the moved task id, its destination column (state), and the 0-based index
+// it was dropped at within that column. toIndex is a non-negative integer; the
+// service clamps an out-of-range index to the column's bounds (R3). Importable
+// from the client island so the optimistic layer and the action share one shape.
+export const reorderTaskSchema = z.object({
+  taskId: idSchema,
+  toState: taskStateSchema,
+  toIndex: z.number().int().min(0),
+});
+export type ReorderTaskInput = z.infer<typeof reorderTaskSchema>;
+
+// Filters parsed from the board's URL search params (R7). Each is optional;
+// blank/"none" normalizes to undefined so an absent param means "no filter".
+export const taskFiltersSchema = z.object({
+  assigneeId: optionalAssigneeSchema,
+  categoryId: z
+    .union([z.literal(""), idSchema])
+    .optional()
+    .transform((value) => (value ? value : undefined)),
+  state: z
+    .union([z.literal(""), taskStateSchema])
+    .optional()
+    .transform((value) => (value ? (value as TaskState) : undefined)),
+  priority: z
+    .union([z.literal(""), prioritySchema])
+    .optional()
+    .transform((value) => (value ? (value as Priority) : undefined)),
+});
+export type TaskFilters = z.infer<typeof taskFiltersSchema>;

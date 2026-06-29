@@ -73,5 +73,10 @@ prisma/              schema.prisma + migrations + seed.
 - A Vercel preview deploy builds successfully.
 - Reviewer has approved (`progress/review_<feature>.md` = APPROVE).
 
-> Adjust the bracketed/project-specific parts once `project-documents/` and the
-> `00_project_setup` feature pin down exact folder names (e.g. `src/` vs root).
+## Source layout (decided)
+
+The project uses a **root-level `app/`** directory (not `src/app/`). All
+top-level source folders — `app/`, `components/`, `lib/`, `prisma/`, `e2e/` —
+live at the repository root, and the `@/*` path alias resolves to the repository
+root (`@/lib/...`, `@/components/...`). Decided for `00_project_setup`
+(2026-06-21).
