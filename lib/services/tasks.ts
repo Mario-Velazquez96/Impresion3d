@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { registerCatalogReference } from "@/lib/services/catalogs";
 import type {
   CreateTaskInput,
+  Priority,
   ReorderTaskInput,
   SubtaskInput,
   TaskFilters,
@@ -47,6 +48,7 @@ export type TaskWithSubtasks = {
   description: string | null;
   categoryId: string;
   state: TaskState;
+  priority: Priority;
   assigneeId: string | null;
   dueDate: Date | null;
   position: number;
@@ -63,10 +65,12 @@ export function buildTaskWhere(filters: TaskFilters) {
     assigneeId?: string;
     categoryId?: string;
     state?: TaskState;
+    priority?: Priority;
   } = {};
   if (filters.assigneeId) where.assigneeId = filters.assigneeId;
   if (filters.categoryId) where.categoryId = filters.categoryId;
   if (filters.state) where.state = filters.state;
+  if (filters.priority) where.priority = filters.priority;
   return where;
 }
 
@@ -87,6 +91,7 @@ export async function listTasks(
       description: true,
       categoryId: true,
       state: true,
+      priority: true,
       assigneeId: true,
       dueDate: true,
       position: true,
@@ -131,6 +136,7 @@ export async function createTask(input: CreateTaskInput) {
       description: input.description ?? null,
       categoryId: input.categoryId,
       state: input.state,
+      priority: input.priority,
       assigneeId: input.assigneeId ?? null,
       dueDate: input.dueDate ?? null,
       position,
@@ -151,6 +157,7 @@ export async function updateTask(input: UpdateTaskInput) {
       description: input.description ?? null,
       categoryId: input.categoryId,
       state: input.state,
+      priority: input.priority,
       assigneeId: input.assigneeId ?? null,
       dueDate: input.dueDate ?? null,
     },

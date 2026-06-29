@@ -44,6 +44,23 @@ describe("TaskFilters (R7 — URL params)", () => {
     expect(pushMock).toHaveBeenCalledWith("/board?state=BLOCKER");
   });
 
+  it("pushes ?priority=<LEVEL> when a priority is selected (08 — R5)", () => {
+    render(<TaskFilters categories={categories} users={users} />);
+    fireEvent.change(screen.getByLabelText("Priority"), {
+      target: { value: "HIGH" },
+    });
+    expect(pushMock).toHaveBeenCalledWith("/board?priority=HIGH");
+  });
+
+  it("clears the priority param when returning to 'All priorities' (08 — R5)", () => {
+    currentParams = new URLSearchParams("priority=HIGH");
+    render(<TaskFilters categories={categories} users={users} />);
+    fireEvent.change(screen.getByLabelText("Priority"), {
+      target: { value: "" },
+    });
+    expect(pushMock).toHaveBeenCalledWith("/board");
+  });
+
   it("merges a new filter with existing params", () => {
     currentParams = new URLSearchParams("owner=u1");
     render(<TaskFilters categories={categories} users={users} />);

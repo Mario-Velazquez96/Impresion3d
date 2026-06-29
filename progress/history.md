@@ -135,3 +135,31 @@
 **Reports:** `progress/impl_07_weekly_planning.md`, `progress/review_07_weekly_planning.md`.
 
 ---
+
+---
+
+## 07_weekly_planning — AMENDMENT (2026-06-23): picker sources full Color catalog
+
+**Change:** Product-owner decision during live staging testing — the Planning page's "colors to dry this week" picker now lists ALL catalog colors (`db.color.findMany`, name asc), not only colors used by existing prints. Spec updated by spec_author; implemented and reviewer-APPROVED.
+
+**Scope:** One app-code file — `app/(app)/planning/page.tsx` (load full catalog for the picker; removed the colors-used-by-prints derivation). Match core (`lib/planning-core.ts`), `setWeekColors` atomic replace, grid, and drying panel UNCHANGED. `components/planning/__tests__/WeekPlanner.test.tsx` strengthened to assert the picker lists all catalog colors incl. one unused by any print.
+
+**Verification:** typecheck/lint green; Vitest 424 tests/42 files; `lib/planning-core.ts` still 100% branch; build OK. Reviewer independently reproduced.
+
+**Reports:** `progress/impl_07_picker_all_colors.md`, `progress/review_07_picker_all_colors.md`.
+
+---
+
+## 08_task_priority — DONE (2026-06-28)
+
+**Feature:** Task priority (LOW/MEDIUM/HIGH, default MEDIUM). New feature requested during live staging testing; spec authored by spec_author, product decisions gathered from the human (3 levels; colored badge + board priority filter; NO within-column auto-sort), implemented and reviewer-APPROVED.
+
+**Delivered:** `Priority` enum + `Task.priority @default(MEDIUM)` + `@@index([priority])`; migration `20260628120000_task_priority` (CREATE TYPE + add column NOT NULL DEFAULT 'MEDIUM' backfilling existing rows + index) — APPLIED to staging via `prisma migrate deploy`; `prioritySchema` + `priority` on create/update + filter schemas (invalid rejected, absent→MEDIUM); `buildTaskWhere`/`listTasks`/`createTask`/`updateTask` carry priority (single query, ordering unchanged — no priority sort); `actions/tasks.ts` passes priority through; board page parses `?priority=`; `TaskFilters` priority dropdown (URL param, AND-composes with owner/category/state, clearable); `TaskFormDialog` priority select (default Medium / prefilled on edit); `TaskCard` labelled colored badge (HIGH destructive, MEDIUM amber, LOW muted — dark-theme, not color-only). No new deps/routes/env.
+
+**Requirements:** R1–R7 all satisfied and traced to tests.
+
+**Verification:** Credential-free pipeline green — typecheck 0 errors, lint 0, Vitest 450 tests/43 files (services 100%, validation ~99%). Build intentionally skipped during dev (running dev server shares `.next`); a real build runs on deploy. Reviewer independently reproduced typecheck/lint/test.
+
+**Reports:** `progress/impl_08_task_priority.md`, `progress/review_08_task_priority.md`.
+
+---

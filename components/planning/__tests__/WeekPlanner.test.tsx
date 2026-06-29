@@ -47,8 +47,13 @@ import { useState } from "react";
 const PIEL: ColorView = { id: "piel", name: "Piel", hex: "#eecda3" };
 const VERDE: ColorView = { id: "verde", name: "Verde", hex: "#00aa00" };
 const ROJO: ColorView = { id: "rojo", name: "Rojo", hex: "#cc0000" };
+// A catalog color used by NO print — it must still appear in the picker because the
+// picker is sourced from the full Color catalog, not the colors-used-by-prints set.
+const AZUL: ColorView = { id: "azul", name: "Azul", hex: "#0000cc" };
 
-const allColors = [PIEL, VERDE, ROJO];
+// The picker's selectable list = the full catalog (incl. the unused-by-prints AZUL),
+// ordered by name: Azul, Piel, Rojo, Verde.
+const allColors = [AZUL, PIEL, ROJO, VERDE];
 
 const prints: PrintView[] = [
   { id: "p-piel", name: "Piel Print", colors: [PIEL] },
@@ -114,6 +119,25 @@ describe("ColorPicker (R3 — persists via setWeekColors)", () => {
     const colors = swatches.map((s) => s.style.backgroundColor);
     expect(colors).toContain("rgb(238, 205, 163)"); // Piel
     expect(colors).toContain("rgb(0, 170, 0)"); // Verde
+    expect(colors).toContain("rgb(0, 0, 204)"); // Azul (unused by prints, R11)
+  });
+
+  it("lists ALL catalog colors ordered by name, incl. one no print uses (R3, R11)", () => {
+    render(<Harness />);
+    // Every catalog color passed in is selectable — including Azul, which no print
+    // uses — proving the picker is sourced from the full catalog, not colors-used.
+    const checkboxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
+    expect(checkboxes).toHaveLength(allColors.length);
+
+    // The picker renders the catalog in the order it is given (name asc from the
+    // server): Azul, Piel, Rojo, Verde.
+    const labels = checkboxes.map(
+      (cb) => cb.closest("label")?.textContent?.trim() ?? "",
+    );
+    expect(labels).toEqual(["Azul", "Piel", "Rojo", "Verde"]);
+
+    // Azul has no associated print yet, but is still selectable.
+    expect(screen.getByLabelText("Azul")).toBeInTheDocument();
   });
 });
 

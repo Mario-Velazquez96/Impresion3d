@@ -19,3 +19,11 @@ export const TASK_STATE_LABELS: Record<string, string> = {
   BLOCKER: "Blocker",
   DONE: "Done",
 };
+
+// Human-readable labels for each Priority value (08_task_priority). Used by the
+// form/filter selects and the TaskCard badge so the priority is never color-only.
+export const PRIORITY_LABELS: Record<string, string> = {
+  LOW: "Low",
+  MEDIUM: "Medium",
+  HIGH: "High",
+};

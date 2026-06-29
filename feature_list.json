@@ -56,6 +56,13 @@
       "sdd": true,
       "status": "done",
       "depends_on": ["06_print_inventory"]
+    },
+    {
+      "name": "08_task_priority",
+      "description": "Add a Priority (LOW/MEDIUM/HIGH, default MEDIUM) to Task: schema + migration, Zod validation, a priority select in the task form, a colored priority badge on task cards, and a priority filter on the board toolbar. No automatic within-column sorting.",
+      "sdd": true,
+      "status": "done",
+      "depends_on": ["03_task_board_core"]
     }
   ]
 }

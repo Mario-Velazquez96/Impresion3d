@@ -1,7 +1,7 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { signOut } from "@/actions/users";
+import { MainNav } from "@/components/layout/MainNav";
 import { Button } from "@/components/ui/button";
 import { getCurrentUser } from "@/lib/auth";
 
@@ -22,37 +22,7 @@ export default async function AppLayout({
   return (
     <div className="flex min-h-screen flex-col">
       <header className="flex items-center justify-between border-b px-6 py-3">
-        <nav className="flex items-center gap-4">
-          <Link href="/board" className="text-sm font-semibold">
-            Tower Layers
-          </Link>
-          <Link
-            href="/inventory"
-            className="text-sm text-muted-foreground hover:text-foreground"
-          >
-            Inventory
-          </Link>
-          <Link
-            href="/planning"
-            className="text-sm text-muted-foreground hover:text-foreground"
-          >
-            Planning
-          </Link>
-          <Link
-            href="/expenses"
-            className="text-sm text-muted-foreground hover:text-foreground"
-          >
-            Expenses
-          </Link>
-          {user.role === "ADMIN" ? (
-            <Link
-              href="/admin/users"
-              className="text-sm text-muted-foreground hover:text-foreground"
-            >
-              Users
-            </Link>
-          ) : null}
-        </nav>
+        <MainNav showAdmin={user.role === "ADMIN"} />
         <div className="flex items-center gap-3">
           <span className="text-sm text-muted-foreground">{user.email}</span>
           <form action={signOut}>

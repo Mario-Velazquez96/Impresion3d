@@ -3,11 +3,12 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import {
+  PRIORITY_LABELS,
   TASK_STATE_LABELS,
   type CategoryOption,
   type UserOption,
 } from "@/components/board/board-types";
-import { TASK_STATES } from "@/lib/validation/task";
+import { PRIORITIES, TASK_STATES } from "@/lib/validation/task";
 
 /**
  * Board filters (Client island). Owner/category/state <select>s write to the URL
@@ -44,7 +45,8 @@ export function TaskFilters({
   const owner = searchParams.get("owner") ?? "";
   const category = searchParams.get("category") ?? "";
   const state = searchParams.get("state") ?? "";
-  const hasFilters = Boolean(owner || category || state);
+  const priority = searchParams.get("priority") ?? "";
+  const hasFilters = Boolean(owner || category || state || priority);
 
   return (
     <div className="flex flex-wrap items-end gap-3">
@@ -101,6 +103,25 @@ export function TaskFilters({
           {TASK_STATES.map((s) => (
             <option key={s} value={s}>
               {TASK_STATE_LABELS[s] ?? s}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label htmlFor="filter-priority" className="text-xs font-medium">
+          Priority
+        </label>
+        <select
+          id="filter-priority"
+          value={priority}
+          onChange={(e) => setParam("priority", e.target.value)}
+          className={selectClass}
+        >
+          <option value="">All priorities</option>
+          {PRIORITIES.map((p) => (
+            <option key={p} value={p}>
+              {PRIORITY_LABELS[p] ?? p}
             </option>
           ))}
         </select>

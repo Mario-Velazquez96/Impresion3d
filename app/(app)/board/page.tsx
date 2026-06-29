@@ -39,6 +39,7 @@ export default async function BoardPage({
     assigneeId: first(params.owner) ?? "",
     categoryId: first(params.category) ?? "",
     state: first(params.state) ?? "",
+    priority: first(params.priority) ?? "",
   });
 
   const [tasks, categories, users] = await Promise.all([
@@ -56,6 +57,7 @@ export default async function BoardPage({
     description: task.description,
     categoryId: task.categoryId,
     state: task.state,
+    priority: task.priority,
     assigneeId: task.assigneeId,
     dueDate: task.dueDate ? task.dueDate.toISOString() : null,
     position: task.position,

@@ -6,9 +6,10 @@
 
 Schema + a pure color-match service + a planning UI. The matching logic is the
 heart of the feature, so it is a framework-agnostic, fully unit-tested function.
-The page is a Server Component that loads/creates the week plan and the inventory
-with colors; the color picker, filter toggle, and day grid are Client islands
-calling server actions. "Dry the day before" is **computed**, never stored.
+The page is a Server Component that loads/creates the week plan, the full color
+catalog (for the picker), and the inventory with colors; the color picker, filter
+toggle, and day grid are Client islands calling server actions. "Dry the day
+before" is **computed**, never stored.
 
 ## Schema & RLS
 
@@ -68,11 +69,13 @@ partialMatches(prints, availableIds): prints where some colorId ∈ availableIds
 ## File layout & boundaries
 
 ```
-app/(app)/planning/page.tsx     # Server: resolve current week → getOrCreateWeekPlan; load prints+colors → <WeekPlanner>
+app/(app)/planning/page.tsx     # Server: resolve current week → getOrCreateWeekPlan;
+                                #   load FULL Color catalog (db.color.findMany, orderBy name asc)
+                                #   + prints+colors → <WeekPlanner allColors={...}>
   loading.tsx · error.tsx
 components/planning/
   WeekPlanner.tsx (client)      # holds available-colors + mode state; composes the below
-  ColorPicker.tsx (client)      # multi-select swatches → setWeekColors action
+  ColorPicker.tsx (client)      # multi-select swatches over ALL catalog colors → setWeekColors action
   MatchModeToggle.tsx (client)  # Full (default) / Partial button
   FilteredInventory.tsx (client)# results from the match service; "missing colors" badges in partial
   WeekGrid.tsx (client)         # 7 DayColumns; assign/move/remove; "dry the day before" panel
@@ -82,6 +85,11 @@ lib/validation/planning.ts      # setWeekColorsSchema, assignItemSchema, moveIte
 actions/planning.ts             # "use server": requireUser + zod + revalidate('/planning')
 ```
 
+- **Picker source:** the page loads the **full `Color` catalog** via
+  `db.color.findMany({ orderBy: { name: 'asc' } })` and passes it to `ColorPicker`,
+  which renders one selectable swatch per catalog color. The currently-selected
+  available set (the `WeekPlanColor` rows) drives which entries are checked. This
+  is independent of the prints/colors loaded for matching.
 - `setWeekColors`: upsert `WeekPlan` by `weekStartDate`, then replace
   `WeekPlanColor` set in a transaction (R3).
 - Matching runs **server-side** in the page (and re-derived in the client when the
@@ -106,14 +114,24 @@ actions/planning.ts             # "use server": requireUser + zod + revalidate('
 - **Vitest (core):** `fullMatches`/`partialMatches`/`dryingSchedule` — the worked
   example (R4/R5), empty-available (R6), missing-color computation, day−1 mapping
   incl. the MON edge case. This is the highest-value test set.
-- **Component:** ColorPicker persists; MatchModeToggle switches lists; WeekGrid
-  assign/move/remove calls actions; partial badges show missing colors.
+- **Component:** ColorPicker lists ALL catalog colors (ordered by name) and
+  persists the selection; MatchModeToggle switches lists; WeekGrid assign/move/
+  remove calls actions; partial badges show missing colors.
 - **E2E:** pick colors → full-match inventory → toggle partial (missing shown) →
   assign prints to days → week grid + dry-the-day-before list → reload persists.
 - **RLS denial test:** unauthenticated planning read/write rejected (R2, R10).
 - Coverage target: the match/drying functions **100% branches**; core E2E green.
 
-## Open items / discrepancies
+## Picker source — resolution
+
+- The week color picker is sourced from the **full `Color` catalog**
+  (`db.color.findMany`, ordered by `name`), so a color added to the catalog is
+  immediately selectable in planning even before any print uses it. This supersedes
+  the earlier implementer deviation that sourced the picker from the deduped set of
+  colors used by existing prints. Only the picker's selectable list changes; the
+  match core, drying schedule, and atomic color-set replace are intact.
+
+## Open items
 
 - Week start (Monday default) + date-picker snapping — confirm at gate.
 - dnd vs Select for day assignment — Select required, dnd optional this slice.

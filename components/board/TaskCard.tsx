@@ -2,10 +2,12 @@ import type { DraggableAttributes } from "@dnd-kit/core";
 
 import { SubtaskList } from "@/components/board/SubtaskList";
 import { TaskFormDialog } from "@/components/board/TaskFormDialog";
-import type {
-  CategoryOption,
-  UserOption,
+import {
+  PRIORITY_LABELS,
+  type CategoryOption,
+  type UserOption,
 } from "@/components/board/board-types";
+import { cn } from "@/lib/utils";
 
 /**
  * A single board task (Server Component). Shows the title, a category badge, an
@@ -22,10 +24,23 @@ export type TaskCardView = {
   description: string | null;
   categoryId: string;
   state: string;
+  priority: string;
   assigneeId: string | null;
   dueDate: string | null; // ISO string, serializable across the boundary
   position: number;
   subtasks: { id: string; title: string; done: boolean }[];
+};
+
+/**
+ * Dark-theme-friendly badge tone per priority (R4). The label text is always
+ * shown alongside, so the badge is never color-only. HIGH uses the semantic
+ * destructive token; MEDIUM uses an explicit amber (there is no semantic amber
+ * token and amber reads well on the dark surface); LOW uses the muted token.
+ */
+const PRIORITY_BADGE_CLASS: Record<string, string> = {
+  HIGH: "bg-destructive/15 text-destructive border-destructive/30",
+  MEDIUM: "bg-amber-500/15 text-amber-400 border-amber-500/30",
+  LOW: "bg-muted text-muted-foreground border-border",
 };
 
 function formatDate(iso: string): string {
@@ -103,6 +118,7 @@ export function TaskCard({
             description: task.description,
             categoryId: task.categoryId,
             state: task.state,
+            priority: task.priority,
             assigneeId: task.assigneeId,
             dueDate: task.dueDate,
           }}
@@ -116,6 +132,14 @@ export function TaskCard({
       ) : null}
 
       <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
+        <span
+          className={cn(
+            "rounded border px-1.5 py-0.5 font-medium",
+            PRIORITY_BADGE_CLASS[task.priority] ?? PRIORITY_BADGE_CLASS.MEDIUM,
+          )}
+        >
+          {PRIORITY_LABELS[task.priority] ?? task.priority}
+        </span>
         <span className="rounded border px-1.5 py-0.5 text-muted-foreground">
           {category?.name ?? "Uncategorized"}
         </span>

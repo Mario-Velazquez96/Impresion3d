@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 
 // TaskCard -> TaskFormDialog/SubtaskList -> @/actions/tasks ("use server").
 vi.mock("@/actions/tasks", () => ({
@@ -22,6 +22,7 @@ function makeTask(partial: Partial<TaskCardView> = {}): TaskCardView {
     description: null,
     categoryId: "c1",
     state: "TODO",
+    priority: "MEDIUM",
     assigneeId: null,
     dueDate: null,
     position: 0,
@@ -79,6 +80,27 @@ describe("TaskCard", () => {
     expect(row.textContent).toMatch(/Due /);
     expect(row.textContent).toContain("1/2 done");
   });
+
+  it.each([
+    ["HIGH", "High", "text-destructive"],
+    ["MEDIUM", "Medium", "text-amber-400"],
+    ["LOW", "Low", "text-muted-foreground"],
+  ])(
+    "renders the %s priority badge with label %s and its tone (08 — R4)",
+    (priority, label, toneClass) => {
+      render(
+        <TaskCard
+          task={makeTask({ priority })}
+          categories={categories}
+          users={users}
+        />,
+      );
+      const row = badgeRow();
+      const badge = within(row).getByText(label);
+      expect(badge).toBeInTheDocument();
+      expect(badge.className).toContain(toneClass);
+    },
+  );
 
   it("falls back to 'Uncategorized' when the category is unknown", () => {
     render(

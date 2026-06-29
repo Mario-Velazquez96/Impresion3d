@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { WeekPlanner } from "@/components/planning/WeekPlanner";
 import { requireUser } from "@/lib/auth";
+import { db } from "@/lib/db";
 import { listPrints } from "@/lib/services/prints";
 import {
   getOrCreateWeekPlan,
@@ -37,9 +38,16 @@ export default async function PlanningPage({
   const base = Number.isNaN(requested.getTime()) ? new Date() : requested;
   const monday = snapToMonday(base);
 
-  const [plan, prints] = await Promise.all([
+  const [plan, prints, allColors] = await Promise.all([
     getOrCreateWeekPlan(monday, user.id),
     listPrints(),
+    // The picker's selectable list is the FULL Color catalog, ordered by name, so
+    // every catalog color is selectable for the week even if no print uses it yet.
+    // This is independent of the prints loaded for matching (R3, R11).
+    db.color.findMany({
+      select: { id: true, name: true, hex: true },
+      orderBy: { name: "asc" },
+    }),
   ]);
 
   // Flatten prints to the matchable shape the client island needs (id, name,
@@ -49,18 +57,6 @@ export default async function PlanningPage({
     name: print.name,
     colors: print.colors,
   }));
-
-  // The catalog of every color (for the picker), sourced from the prints' colors so
-  // only colors actually in use surface — deduplicated by id.
-  const colorMap = new Map<string, { id: string; name: string; hex: string }>();
-  for (const print of prints) {
-    for (const color of print.colors) {
-      if (!colorMap.has(color.id)) colorMap.set(color.id, color);
-    }
-  }
-  const allColors = Array.from(colorMap.values()).sort((a, b) =>
-    a.name.localeCompare(b.name),
-  );
 
   return (
     <div className="flex flex-col gap-6">

@@ -41,6 +41,14 @@ authenticated users may read or write.
 the system shall persist them as `WeekPlanColor` rows (replacing the prior set) for
 that week's `WeekPlan`, creating the `WeekPlan` if absent.
 
+> **Picker source (clarification):** The week color picker shall list **ALL**
+> colors in the `Color` catalog, ordered by `name` — not only the colors currently
+> used by prints in the inventory. A color newly added to the catalog is therefore
+> immediately selectable in planning, even before any print uses it. This changes
+> only the **source** of the selectable color list; persisting the selection (R3),
+> the swatches (R11), and the matching logic (R4 full / R5 partial / R6
+> empty-available) are unchanged.
+
 **R4 (State-driven / full match — default):** While the filter is in full-match
 mode, the system shall list only prints whose entire color set is contained in the
 week's available colors.
@@ -87,6 +95,10 @@ Available colors = {Piel MM, Café Moka MM, Azul Ballena MM}:
 - A print using {Piel MM, Verde Iguana MM} → **partial match**, missing
   {Verde Iguana MM}.
 - A print using {Rojo Cochinilla MM} → not shown in either mode.
+
+(The worked example is unaffected by the picker-source clarification: the picker
+now offers the full catalog, but the available set chosen for the week and the
+match outcomes above are identical.)
 
 ## Open items
 

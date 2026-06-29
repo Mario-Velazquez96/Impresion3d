@@ -63,6 +63,32 @@ describe("TaskFormDialog — create (R4)", () => {
     expect(submitted.get("title")).toBe("Buy filament");
     expect(submitted.get("categoryId")).toBe("c1");
     expect(submitted.get("state")).toBe("IN_PROGRESS");
+    // priority defaults to MEDIUM on create (08 — R2).
+    expect(submitted.get("priority")).toBe("MEDIUM");
+  });
+
+  it("submits the chosen priority (08 — R2)", async () => {
+    createMock.mockResolvedValue({ ok: true });
+    render(
+      <TaskFormDialog mode="create" categories={categories} users={users} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "New task" }));
+    const dialog = screen.getByRole("dialog", { name: "New task" });
+    fireEvent.change(within(dialog).getByLabelText("Title"), {
+      target: { value: "Urgent" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Category"), {
+      target: { value: "c1" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Priority"), {
+      target: { value: "HIGH" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
+
+    await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
+    const submitted = createMock.mock.calls[0][1] as FormData;
+    expect(submitted.get("priority")).toBe("HIGH");
   });
 
   it("renders all six state options in the column select (R8)", () => {
@@ -111,6 +137,7 @@ describe("TaskFormDialog — edit (R5)", () => {
     description: "desc",
     categoryId: "c1",
     state: "TODO",
+    priority: "HIGH",
     assigneeId: "u1",
     dueDate: "2026-07-01T00:00:00.000Z",
   };
@@ -132,6 +159,10 @@ describe("TaskFormDialog — edit (R5)", () => {
     expect(
       (within(dialog).getByLabelText("Title") as HTMLInputElement).value,
     ).toBe("Old title");
+    // Priority is prefilled from the task (08 — R3).
+    expect(
+      (within(dialog).getByLabelText("Priority") as HTMLSelectElement).value,
+    ).toBe("HIGH");
     // Move the card to another column via the state field (R5/R8).
     fireEvent.change(within(dialog).getByLabelText("Column (state)"), {
       target: { value: "DONE" },
@@ -142,5 +173,6 @@ describe("TaskFormDialog — edit (R5)", () => {
     const submitted = updateMock.mock.calls[0][1] as FormData;
     expect(submitted.get("id")).toBe("t1");
     expect(submitted.get("state")).toBe("DONE");
+    expect(submitted.get("priority")).toBe("HIGH");
   });
 });

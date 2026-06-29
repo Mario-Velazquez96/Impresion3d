@@ -96,6 +96,7 @@ export async function createTaskAction(
     description: formData.get("description"),
     categoryId: formData.get("categoryId"),
     state: formData.get("state"),
+    priority: formData.get("priority"),
     assigneeId: formData.get("assigneeId"),
     dueDate: formData.get("dueDate"),
   });
@@ -126,6 +127,7 @@ export async function updateTaskAction(
     description: formData.get("description"),
     categoryId: formData.get("categoryId"),
     state: formData.get("state"),
+    priority: formData.get("priority"),
     assigneeId: formData.get("assigneeId"),
     dueDate: formData.get("dueDate"),
   });

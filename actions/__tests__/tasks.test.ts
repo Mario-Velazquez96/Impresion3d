@@ -130,6 +130,44 @@ describe("createTaskAction (R4, R9, R10)", () => {
     expect(result).toEqual({ ok: true });
   });
 
+  it("passes the chosen priority through to createTask (08 — R2)", async () => {
+    requireUserMock.mockResolvedValue({ id: "u1" });
+    createTaskMock.mockResolvedValue({ id: "t1" });
+
+    await createTaskAction(
+      null,
+      fd({ title: "T", categoryId: "c1", state: "TODO", priority: "HIGH" }),
+    );
+
+    expect(createTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({ priority: "HIGH" }),
+    );
+  });
+
+  it("defaults priority to MEDIUM when the form omits it (08 — R2)", async () => {
+    requireUserMock.mockResolvedValue({ id: "u1" });
+    createTaskMock.mockResolvedValue({ id: "t1" });
+
+    await createTaskAction(
+      null,
+      fd({ title: "T", categoryId: "c1", state: "TODO" }),
+    );
+
+    expect(createTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({ priority: "MEDIUM" }),
+    );
+  });
+
+  it("rejects an invalid priority with no write (08 — R6)", async () => {
+    requireUserMock.mockResolvedValue({ id: "u1" });
+    const result = await createTaskAction(
+      null,
+      fd({ title: "T", categoryId: "c1", state: "TODO", priority: "URGENT" }),
+    );
+    expect(result.ok).toBe(false);
+    expect(createTaskMock).not.toHaveBeenCalled();
+  });
+
   it("surfaces a generic failure on a non-FK service error", async () => {
     requireUserMock.mockResolvedValue({ id: "u1" });
     createTaskMock.mockRejectedValue(new Error("db down"));
@@ -166,6 +204,26 @@ describe("updateTaskAction (R5, R9, R10)", () => {
     );
     expect(revalidatePathMock).toHaveBeenCalledWith("/board");
     expect(result).toEqual({ ok: true });
+  });
+
+  it("passes the chosen priority through to updateTask (08 — R3)", async () => {
+    requireUserMock.mockResolvedValue({ id: "u1" });
+    updateTaskMock.mockResolvedValue({ id: "t1" });
+
+    await updateTaskAction(
+      null,
+      fd({
+        id: "t1",
+        title: "T",
+        categoryId: "c1",
+        state: "TODO",
+        priority: "LOW",
+      }),
+    );
+
+    expect(updateTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({ priority: "LOW" }),
+    );
   });
 
   it("maps P2003 to a validation error (R10)", async () => {

@@ -22,6 +22,14 @@ export const TASK_STATES = [
 export const taskStateSchema = z.enum(TASK_STATES);
 export type TaskState = z.infer<typeof taskStateSchema>;
 
+// Mirrors the Prisma `Priority` enum (08_task_priority). Declared here — like
+// TASK_STATES — so the client form/filters import the canonical set without
+// pulling in the server-only Prisma client. The array order is the form/filter
+// render order (Low → Medium → High).
+export const PRIORITIES = ["LOW", "MEDIUM", "HIGH"] as const;
+export const prioritySchema = z.enum(PRIORITIES);
+export type Priority = z.infer<typeof prioritySchema>;
+
 // A cuid foreign-key id. Non-empty string; existence is enforced by the DB FK
 // (a bad category/assignee raises Prisma P2003, which the action maps to a
 // validation error — R10).
@@ -76,6 +84,17 @@ export const createTaskSchema = z.object({
   description: optionalTextSchema,
   categoryId: idSchema,
   state: taskStateSchema,
+  // Defaults to MEDIUM when the form omits it — absent (undefined), "" or null
+  // all normalize to MEDIUM (R2); an out-of-set value still fails validation
+  // (R6). Inherited by updateTaskSchema via .extend (R3).
+  priority: z
+    .union([z.literal(""), z.null(), prioritySchema])
+    .optional()
+    .transform((value) =>
+      value === "" || value === null || value === undefined
+        ? ("MEDIUM" as Priority)
+        : value,
+    ),
   assigneeId: optionalAssigneeSchema,
   dueDate: optionalDueDateSchema,
 });
@@ -125,5 +144,9 @@ export const taskFiltersSchema = z.object({
     .union([z.literal(""), taskStateSchema])
     .optional()
     .transform((value) => (value ? (value as TaskState) : undefined)),
+  priority: z
+    .union([z.literal(""), prioritySchema])
+    .optional()
+    .transform((value) => (value ? (value as Priority) : undefined)),
 });
 export type TaskFilters = z.infer<typeof taskFiltersSchema>;

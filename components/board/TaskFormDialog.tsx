@@ -8,6 +8,7 @@ import {
   type TaskActionResult,
 } from "@/actions/tasks";
 import {
+  PRIORITY_LABELS,
   TASK_STATE_LABELS,
   type CategoryOption,
   type UserOption,
@@ -15,7 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { TASK_STATES } from "@/lib/validation/task";
+import { PRIORITIES, TASK_STATES } from "@/lib/validation/task";
 
 /**
  * Create/edit task dialog (Client island). Renders a trigger button and a native
@@ -35,6 +36,7 @@ type EditTask = {
   description: string | null;
   categoryId: string;
   state: string;
+  priority: string;
   assigneeId: string | null;
   dueDate: string | null; // ISO string
 };
@@ -170,6 +172,22 @@ export function TaskFormDialog({
               {TASK_STATES.map((s) => (
                 <option key={s} value={s}>
                   {TASK_STATE_LABELS[s] ?? s}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label htmlFor={`${idPrefix}-priority`}>Priority</Label>
+            <select
+              id={`${idPrefix}-priority`}
+              name="priority"
+              defaultValue={task?.priority ?? "MEDIUM"}
+              className={selectClass}
+            >
+              {PRIORITIES.map((p) => (
+                <option key={p} value={p}>
+                  {PRIORITY_LABELS[p] ?? p}
                 </option>
               ))}
             </select>

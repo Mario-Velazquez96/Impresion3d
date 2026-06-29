@@ -32,6 +32,7 @@ function card(partial: Partial<TaskCardView> & { id: string }): TaskCardView {
     description: null,
     categoryId: "c1",
     state: "TODO",
+    priority: "MEDIUM",
     assigneeId: null,
     dueDate: null,
     position: 0,

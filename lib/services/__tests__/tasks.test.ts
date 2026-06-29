@@ -94,6 +94,30 @@ describe("buildTaskWhere (R7 filter composition)", () => {
       buildTaskWhere({ assigneeId: "u1", categoryId: "c1", state: "DONE" }),
     ).toEqual({ assigneeId: "u1", categoryId: "c1", state: "DONE" });
   });
+
+  it("includes only the priority when only priority is set (08 — R5)", () => {
+    expect(buildTaskWhere({ priority: "HIGH" })).toEqual({ priority: "HIGH" });
+  });
+
+  it("omits priority when absent (08 — R5)", () => {
+    expect(buildTaskWhere({ categoryId: "c1" })).not.toHaveProperty("priority");
+  });
+
+  it("composes priority (AND) with owner/category/state (08 — R5)", () => {
+    expect(
+      buildTaskWhere({
+        assigneeId: "u1",
+        categoryId: "c1",
+        state: "DONE",
+        priority: "LOW",
+      }),
+    ).toEqual({
+      assigneeId: "u1",
+      categoryId: "c1",
+      state: "DONE",
+      priority: "LOW",
+    });
+  });
 });
 
 describe("listTasks (R7, R8 — single query, ordered, subtasks included)", () => {
@@ -106,6 +130,17 @@ describe("listTasks (R7, R8 — single query, ordered, subtasks included)", () =
     expect(args.where).toEqual({ categoryId: "c1" });
     expect(args.orderBy).toEqual({ position: "asc" });
     expect(args.select.subtasks.orderBy).toEqual({ position: "asc" });
+    // priority is selected so the card can render its badge (08 — R4).
+    expect(args.select.priority).toBe(true);
+  });
+
+  it("composes the priority filter into the where (08 — R5)", async () => {
+    dbMock.task.findMany.mockResolvedValue([]);
+    await listTasks({ categoryId: "c1", priority: "HIGH" });
+    expect(dbMock.task.findMany.mock.calls[0][0].where).toEqual({
+      categoryId: "c1",
+      priority: "HIGH",
+    });
   });
 
   it("defaults to no filter when called with no args", async () => {
@@ -124,6 +159,7 @@ describe("createTask (R4 — end-of-column position)", () => {
       title: "T",
       categoryId: "c1",
       state: "TODO",
+      priority: "MEDIUM",
       description: undefined,
       assigneeId: undefined,
       dueDate: undefined,
@@ -145,6 +181,7 @@ describe("createTask (R4 — end-of-column position)", () => {
       title: "T",
       categoryId: "c1",
       state: "DONE",
+      priority: "HIGH",
       description: "d",
       assigneeId: "u1",
       dueDate: new Date("2026-07-01"),
@@ -155,6 +192,8 @@ describe("createTask (R4 — end-of-column position)", () => {
     expect(data.assigneeId).toBe("u1");
     expect(data.description).toBe("d");
     expect(data.dueDate).toEqual(new Date("2026-07-01"));
+    // priority is persisted as given (08 — R2).
+    expect(data.priority).toBe("HIGH");
   });
 
   it("coerces optional fields to null for Prisma", async () => {
@@ -165,6 +204,7 @@ describe("createTask (R4 — end-of-column position)", () => {
       title: "T",
       categoryId: "c1",
       state: "BACKLOG",
+      priority: "MEDIUM",
       description: undefined,
       assigneeId: undefined,
       dueDate: undefined,
@@ -185,6 +225,7 @@ describe("createTask (R4 — end-of-column position)", () => {
         title: "T",
         categoryId: "missing",
         state: "TODO",
+        priority: "MEDIUM",
         description: undefined,
         assigneeId: undefined,
         dueDate: undefined,
@@ -202,6 +243,7 @@ describe("updateTask (R5 — does not reposition)", () => {
       title: "New",
       categoryId: "c2",
       state: "PENDING",
+      priority: "LOW",
       description: undefined,
       assigneeId: undefined,
       dueDate: undefined,
@@ -210,6 +252,7 @@ describe("updateTask (R5 — does not reposition)", () => {
     const args = dbMock.task.update.mock.calls[0][0];
     expect(args.where).toEqual({ id: "t1" });
     expect(args.data.state).toBe("PENDING");
+    expect(args.data.priority).toBe("LOW");
     expect(args.data).not.toHaveProperty("position");
   });
 });

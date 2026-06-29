@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  PRIORITIES,
   TASK_STATES,
   createTaskSchema,
+  prioritySchema,
   subtaskSchema,
   taskFiltersSchema,
   taskStateSchema,
@@ -46,6 +48,8 @@ describe("createTaskSchema (R4, R10)", () => {
       expect(parsed.data.description).toBeUndefined();
       expect(parsed.data.assigneeId).toBeUndefined();
       expect(parsed.data.dueDate).toBeUndefined();
+      // priority defaults to MEDIUM when absent (R2).
+      expect(parsed.data.priority).toBe("MEDIUM");
     }
   });
 
@@ -144,6 +148,65 @@ describe("createTaskSchema (R4, R10)", () => {
   });
 });
 
+describe("prioritySchema (08 — R1, R6)", () => {
+  it("exposes LOW/MEDIUM/HIGH in render order", () => {
+    expect(PRIORITIES).toEqual(["LOW", "MEDIUM", "HIGH"]);
+  });
+
+  it("accepts every member", () => {
+    for (const p of PRIORITIES) {
+      expect(prioritySchema.safeParse(p).success).toBe(true);
+    }
+  });
+
+  it("rejects an unknown priority", () => {
+    expect(prioritySchema.safeParse("URGENT").success).toBe(false);
+  });
+});
+
+describe("createTaskSchema priority (08 — R2, R6)", () => {
+  it("accepts each valid priority and keeps it", () => {
+    for (const p of PRIORITIES) {
+      const parsed = createTaskSchema.safeParse({
+        title: "X",
+        categoryId: "cat1",
+        state: "TODO",
+        priority: p,
+      });
+      expect(parsed.success).toBe(true);
+      if (parsed.success) expect(parsed.data.priority).toBe(p);
+    }
+  });
+
+  it("defaults an absent / empty priority to MEDIUM (R2)", () => {
+    for (const priority of [undefined, ""]) {
+      const parsed = createTaskSchema.safeParse({
+        title: "X",
+        categoryId: "cat1",
+        state: "TODO",
+        priority,
+      });
+      expect(parsed.success).toBe(true);
+      if (parsed.success) expect(parsed.data.priority).toBe("MEDIUM");
+    }
+  });
+
+  it("rejects an invalid priority value (R6)", () => {
+    const parsed = createTaskSchema.safeParse({
+      title: "X",
+      categoryId: "cat1",
+      state: "TODO",
+      priority: "URGENT",
+    });
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues.some((i) => i.path[0] === "priority")).toBe(
+        true,
+      );
+    }
+  });
+});
+
 describe("updateTaskSchema (R5)", () => {
   it("requires an id on top of the create shape", () => {
     const base = { title: "X", categoryId: "cat1", state: "DONE" as const };
@@ -220,5 +283,19 @@ describe("taskFiltersSchema (R7)", () => {
 
   it("rejects an unknown state filter", () => {
     expect(taskFiltersSchema.safeParse({ state: "GONE" }).success).toBe(false);
+  });
+
+  it("normalizes an empty priority param to undefined (08 — R5)", () => {
+    expect(taskFiltersSchema.parse({ priority: "" }).priority).toBeUndefined();
+  });
+
+  it("keeps a concrete priority filter (08 — R5)", () => {
+    expect(taskFiltersSchema.parse({ priority: "HIGH" }).priority).toBe("HIGH");
+  });
+
+  it("rejects an unknown priority filter (08 — R5)", () => {
+    expect(taskFiltersSchema.safeParse({ priority: "URGENT" }).success).toBe(
+      false,
+    );
   });
 });
