@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { Button } from "@/components/ui/button";
 
 export default function HomePage() {
@@ -9,7 +11,9 @@ export default function HomePage() {
           Internal 3D-printing management portal — foundation is ready.
         </p>
       </div>
-      <Button>Get started</Button>
+      <Button asChild>
+        <Link href="/board">Get started</Link>
+      </Button>
     </main>
   );
 }
