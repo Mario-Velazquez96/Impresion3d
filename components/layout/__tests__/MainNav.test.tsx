@@ -59,6 +59,20 @@ describe("MainNav", () => {
     },
   );
 
+  // /image-prep is open to EVERY authenticated user (EMPLOYEE or ADMIN), so its
+  // link lives outside the showAdmin block and must render in both navs
+  // (11_image_prep R1).
+  it.each([false, true])(
+    "renders the Image prep link when showAdmin is %s (not admin-only)",
+    (showAdmin) => {
+      render(<MainNav showAdmin={showAdmin} />);
+      expect(screen.getByRole("link", { name: "Image prep" })).toHaveAttribute(
+        "href",
+        "/image-prep",
+      );
+    },
+  );
+
   it("hides admin links when showAdmin is false", () => {
     render(<MainNav showAdmin={false} />);
     expect(screen.queryByRole("link", { name: "Users" })).toBeNull();

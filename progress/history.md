@@ -199,3 +199,23 @@
 **Reports:** `progress/impl_10_sales_and_balance.md`, `progress/review_10_sales_and_balance.md`.
 
 ---
+
+## 11_image_prep — DONE (2026-07-17)
+
+**Feature:** Client-side HueForge image prep tool — adjust → posterize (median cut in a Web Worker) → palette cleanup → snap to the Color catalog → download PNG. New feature requested during live use; product decisions gathered (stateless like the calculator; median cut for deterministic flat bands; redmean color distance; Floyd–Steinberg off by default). spec_author → implement → reviewer-APPROVED. Depends on 02 (Color catalog read) + 01 (`requireUser`, the `(app)` guard).
+
+**Delivered:** `lib/image-prep-core.ts` — a PURE, client-and-server-safe core (no DOM/Prisma/React/`server-only`, no new dependency) at **100% branch coverage**: hex↔RGB, RGB→HSL, Rec. 601 luminance, redmean `colorDistance`; brightness→contrast→gamma LUT + saturation + percentile auto-levels + 256-bin histogram; **deterministic median-cut** quantization (longest-axis median split weighted by count, defined tie-breaks, no randomness); `nearestIndex`; flat + **Floyd–Steinberg** mapping; `coveragePercent`/`classifyPalette` (neutrals light→dark, colors by hue); `mergeEntries`/`mergeSimilar`/`mergeTiny`; `snapToCatalog` (nearest catalog hex, same-target dedupe, empty-catalog no-op); `indexedToPixels`; `fitWithin`/`downloadFileName`/`formatByteSize`. A **stateless Web Worker** (`image-prep.worker.ts`, logic-free dispatcher, coverage-excluded per the spec's one authorized vitest edit) + `useImagePrepWorker` hook (lazy worker, Promise-per-id, busy flag, terminate on unmount) + typed `worker-messages` protocol. `/image-prep` Server Component in the `(app)` group (`requireUser`, **not** admin-gated) doing ONE read-only `db.color.findMany`; the `ImagePrep` client island owning a `Stage` union (`empty → loaded → adjusted → quantized`) so upstream changes structurally discard downstream results (R16); panels ImageDropzone/AdjustPanel/HistogramChart (SVG)/PosterizePanel/PalettePanel/BeforeAfterPreview; DOM decode glue (`decode.ts`: white-flatten + fitWithin downscale). `Image prep` link added to the shared MainNav OUTSIDE the admin block (visible to all authenticated users).
+
+**No-persistence contract (the defining constraint) — independently verified:** no model/field/enum/migration/RLS change; no server action or `"use server"`; no API route; no Supabase Storage read/write; no env var; no new dependency; no localStorage/cookie/URL state. `prisma/schema.prisma` and `prisma/migrations/` untouched. The image enters via the dropzone and leaves only via the client-side Download anchor; reload = a fresh, empty tool. Only server interaction is the page's Color-catalog read.
+
+**Requirements:** R1–R19 all satisfied and traced to tests.
+
+**Verification:** typecheck 0 errors, lint 0 errors (fixed the one hook warning; 4 pre-existing unrelated warnings remain), Vitest **847 tests / 61 files** (was 761/57 → +86 tests / +4 files), 0 failures; `lib/image-prep-core.ts` **100% statements/branch/functions/lines** (spec's hard target met); other changed modules ≥ 90% lines. Hand-computed 2×2 Floyd–Steinberg case asserted exactly. Build intentionally skipped during dev (running dev server shares `.next`); the Vercel preview is the build target. Reviewer independently reproduced.
+
+**Deviations (minor, reviewer-accepted):** exported `mapToPalette` in addition to `quantize` (the tasks.md hand-computed FS test against a fixed black/white palette is impossible through median cut alone; `quantize` is now its trivial composition); file validation + decode call live in `ImageDropzone` (single `role="alert"` source, prior state untouched on failure); the two IndexedImage (de)serialize helpers live in `worker-messages.ts` (shared by worker + island to prevent wire-shape drift).
+
+**Outstanding (credential-gated, dev/staging only — never production):** run Playwright E2E (`e2e/image-prep.spec.ts`: signed-out redirect + nav link + upload→apply→posterize→snap→download exercising the REAL worker + canvas decode) after setting `.env.local` + E2E account vars. Fixture `e2e/fixtures/image-prep-sample.png` (64×64 four-block) committed.
+
+**Reports:** `progress/impl_11_image_prep.md`, `progress/review_11_image_prep.md`.
+
+---

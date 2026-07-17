@@ -77,6 +77,13 @@
       "sdd": true,
       "status": "done",
       "depends_on": ["06_print_inventory", "01_auth_and_user_management"]
+    },
+    {
+      "name": "11_image_prep",
+      "description": "Client-side image prep tool for HueForge designs (NO persistence, no model/migration): upload an image into a canvas pipeline, tune it (brightness/contrast/saturation/gamma, auto-levels, luminance histogram), posterize to N colors (2-32, default 8) via color quantization in a Web Worker with optional Floyd-Steinberg dithering, then clean the computed palette (tap two colors to merge, merge-similar by color distance, merge-tiny by coverage %) and snap palette entries to the nearest Color catalog hex (the user's real filaments). Before/after preview with per-color coverage, and Download PNG of the working image. Pure quantization/color-math core in lib/, fully unit-tested. Out of scope for v1: AI upscaling, background removal, crop/flatten stages, saving to Storage.",
+      "sdd": true,
+      "status": "done",
+      "depends_on": ["02_catalog_management"]
     }
   ]
 }

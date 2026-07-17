@@ -1,11 +1,12 @@
 # Current session
 
 ## Feature in progress
-(none — all 11 features are `done`)
+_None — no feature is currently in progress. Pick up the next `pending`
+feature in `feature_list.json` per the SDD flow._
 
 ## State
-All features `00`–`10` are reviewer-APPROVED and `done` (see `progress/history.md`
-for per-feature entries). Latest full run: **761 tests / 57 files** green
+All features `00`–`11` are reviewer-APPROVED and `done` (see `progress/history.md`
+for per-feature entries). Latest full run: **847 tests / 61 files** green
 (typecheck · lint · Vitest).
 
 **Deployed.** The app is live on Vercel, auto-deploying from `main`:
@@ -25,9 +26,13 @@ for per-feature entries). Latest full run: **761 tests / 57 files** green
 - `10_sales_and_balance` — `/finances`: Sale + Withdrawal ledgers and a DERIVED
   balance (2 migrations applied to staging). Pure `lib/finances-core.ts` at 100%
   branch coverage.
+- `11_image_prep` — stateless client-side HueForge image prep (`/image-prep`):
+  adjust → posterize (median cut in a Web Worker) → palette merge tools → snap
+  to the Color catalog → download PNG. No persistence (no model/migration/
+  Storage). Pure `lib/image-prep-core.ts` at 100% branch coverage.
 - Dark theme; shared `MainNav` (consistent app/admin nav + Catalogs + Calculator
-  links); planning picker lists the full Color catalog; home "Get started" wired
-  to `/board`.
+  + Image prep links); planning picker lists the full Color catalog; home
+  "Get started" wired to `/board`.
 
 ## Known follow-ups (non-blocking)
 - `prisma db seed` fails on Windows (Unix inline-env in `package.json#prisma`);
