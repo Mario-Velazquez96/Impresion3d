@@ -4,6 +4,9 @@ import Link from "next/link";
  * Shared primary navigation used by both the (app) layout and the admin layout
  * so the same links always appear and the two navs cannot drift apart. The
  * admin-only links (Users, Catalogs) render only when `showAdmin` is true.
+ *
+ * Calculator sits deliberately OUTSIDE the `showAdmin` block: /calculator is open
+ * to every authenticated user, so the link must appear in both navs (09 R1).
  */
 export function MainNav({ showAdmin }: { showAdmin: boolean }) {
   return (
@@ -28,6 +31,12 @@ export function MainNav({ showAdmin }: { showAdmin: boolean }) {
         className="text-sm text-muted-foreground hover:text-foreground"
       >
         Expenses
+      </Link>
+      <Link
+        href="/calculator"
+        className="text-sm text-muted-foreground hover:text-foreground"
+      >
+        Calculator
       </Link>
       {showAdmin ? (
         <>

@@ -22,7 +22,24 @@ describe("MainNav", () => {
       "href",
       "/expenses",
     );
+    expect(screen.getByRole("link", { name: "Calculator" })).toHaveAttribute(
+      "href",
+      "/calculator",
+    );
   });
+
+  // The calculator is open to EVERY authenticated user, so its link lives outside
+  // the showAdmin block and must render in both navs (09_price_calculator R1).
+  it.each([false, true])(
+    "renders the Calculator link when showAdmin is %s (not admin-only)",
+    (showAdmin) => {
+      render(<MainNav showAdmin={showAdmin} />);
+      expect(screen.getByRole("link", { name: "Calculator" })).toHaveAttribute(
+        "href",
+        "/calculator",
+      );
+    },
+  );
 
   it("hides admin links when showAdmin is false", () => {
     render(<MainNav showAdmin={false} />);

@@ -63,6 +63,13 @@
       "sdd": true,
       "status": "done",
       "depends_on": ["03_task_board_core"]
+    },
+    {
+      "name": "09_price_calculator",
+      "description": "Stateless print price calculator (NO persistence, no model/migration): power price per hour x print time + per-color filament cost (price per kg x grams), with a live cost breakdown and total in MXN. Optionally prefill print time and colors from an Inventory print, or enter everything manually. Pure calculation core, fully unit-tested.",
+      "sdd": true,
+      "status": "done",
+      "depends_on": ["06_print_inventory"]
     }
   ]
 }

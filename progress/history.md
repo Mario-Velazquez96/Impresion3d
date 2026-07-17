@@ -163,3 +163,19 @@
 **Reports:** `progress/impl_08_task_priority.md`, `progress/review_08_task_priority.md`.
 
 ---
+
+## 09_price_calculator — DONE (2026-07-16)
+
+**Feature:** Stateless print price calculator. Requested during live use; product decisions gathered from the human (prefill-from-print OR manual; filament priced per kilogram; cost only — no margin). spec_author → implement → reviewer-APPROVED.
+
+**Delivered:** `lib/pricing-core.ts` — a PURE, client-and-server-safe core (`powerCost = rate × minutes/60`; row `cost = grams × pricePerKg/1000`; filamentTotal = sum; total = power + filament; `sanitizeAmount` clamps blank/non-finite/negative → 0, never NaN; `roundMoney` rounds once at the display edge) at **100% branch coverage**; `/calculator` Server Component in the `(app)` group (requireUser, not admin-gated) doing READ-only reference queries (Color catalog + prints) in one Promise.all; `PriceCalculator` + `FilamentRow` client islands deriving the breakdown live during render (no action/fetch/effect); optional "load from a print" prefill (fills printTimeMinutes, one row per color with grams BLANK, surfaces the print's TOTAL filamentGrams as a hint — no invented per-color split) with full manual entry supported; add/remove rows with stable keys; color swatches (reuses `components/planning/Swatch.tsx`); breakdown + total via `formatCurrency` (MXN); `Calculator` link added to the shared MainNav OUTSIDE the admin block (visible to all authenticated users).
+
+**No-persistence contract (the defining constraint) — independently verified:** no model/field/enum/migration/RLS; no server action or `"use server"`; no API route; no env var; no new dependency; no localStorage/cookie/URL state. Only READ queries.
+
+**Requirements:** R1–R11 all satisfied and traced to tests.
+
+**Verification:** typecheck 0 errors, lint clean, Vitest **500 tests / 45 files**, `lib/pricing-core.ts` **100% statements/branch/functions/lines** (spec's hard target met), worked example verified exactly ($2.50/h × 90min + 30g@$450/kg + 20g@$500/kg = $27.25). Build intentionally skipped during dev (running dev server shares `.next`); validated by the real build on deploy. Reviewer independently reproduced.
+
+**Reports:** `progress/impl_09_price_calculator.md`, `progress/review_09_price_calculator.md`.
+
+---
