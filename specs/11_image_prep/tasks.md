@@ -22,6 +22,7 @@
 - [x] Create `components/image-prep/ImagePrep.tsx` (`"use client"`) — the island: the `Stage` union state (`empty → loaded → adjusted → quantized`) so upstream changes structurally discard downstream results; File decode helper (white-flattened, `fitWithin`-downscaled canvas draw → `PixelBuffer`); wire all panels to `useImagePrepWorker` (Apply → adjust+histogram; Posterize → quantize; palette buttons → palette ops with preview back); working image = newest stage; busy propagation (R2, R4, R5, R7, R10–R16, R18)
 - [x] Create `app/(app)/image-prep/page.tsx` (Server Component, thin): `await requireUser()` (**no** `requireAdmin`), ONE query `db.color.findMany({ select: { id, name, hex }, orderBy: { name: "asc" } })`, `metadata.title = "Image prep — Tower Layers"`, render heading + `<ImagePrep catalogColors={…} />` with serializable props (R1, R13, R19)
 - [x] Add an **"Image prep"** `<Link href="/image-prep">` to `components/layout/MainNav.tsx`, after "Finances" and **outside** the `showAdmin` block (R1)
+- [x] **Palette undo (R20)** — add a bounded, client-only undo history of palette states to the `quantized` stage in `components/image-prep/ImagePrep.tsx`: a `history: { image; preview }[]` field seeded by Posterize with the baseline result, pushed by each palette-cleanup action (capped at `MAX_PALETTE_HISTORY` = 20, oldest dropped), and a `handleUndo` that pops it as PURE client state (no worker re-post, no recompute) restoring the prior `image`/`preview`; `canUndo = quantized && !busy && history.length > 1`; a `Ctrl/Cmd+Z` listener that reuses `handleUndo` and only `preventDefault`s when `canUndo`. Add `canUndo`/`onUndo` props + a secondary-styled **Undo** button to `components/image-prep/PalettePanel.tsx`. No worker, `lib/image-prep-core.ts`, schema, dependency, or persistence change (R20)
 - [x] Confirm the no-persistence contract holds: `prisma/schema.prisma` and `prisma/migrations/` untouched, no `actions/` file, no `app/api/` route, no Storage code, no `.env.example` entry, no new `package.json` dependency; the only config diff (if used) is the vitest coverage exclude for the worker entry with its one-line reason (R19)
 
 ## Tests
@@ -44,6 +45,7 @@ coverage-excluded (logic-free browser shell, exercised by E2E — see design.md)
 - [x] Component — posterize: slider bounds 2–32 with default 8, dither checkbox unchecked by default; Posterize sends `{ colors, dither }` and the palette panel appears with swatches, hexes, and coverage % (R7, R8, R9)
 - [x] Component — palette interactions: tap A then B issues the merge (A into B) and the panel updates; tapping A twice deselects without merging; "Merge similar" / "Merge tiny" send their threshold values; with an empty catalog the snap button is disabled with the note; with a catalog, snap relabels entries with filament names (R10, R11, R12, R13, R14)
 - [x] Component — pipeline integrity: after posterize, re-running Apply discards the palette and the preview reverts to the adjusted stage; loading a new file resets everything; the Download button carries the `<a download>` name `<base>-prepped.png` (`toBlob`/object-URL mocked) and triggers no fetch (R15, R16, R17)
+- [x] Component `components/image-prep/__tests__/ImagePrep.test.tsx` (extend) — palette undo: Undo is disabled at the fresh-posterize baseline; after a palette action it enables and restores the previous palette/preview with NO worker call; repeated Undo walks back to the baseline then disables; re-running Posterize resets the history (Undo disabled again); Undo is disabled while the worker is busy; `Ctrl+Z` reverts the last action (R20)
 - [x] Component `components/layout/__tests__/MainNav.test.tsx` (extend) — the **Image prep** link renders with `href="/image-prep"` for BOTH `showAdmin={false}` and `showAdmin={true}` (R1)
 - [x] Commit a small fixture `e2e/fixtures/image-prep-sample.png` (a few solid color blocks, ≤ 64×64) for the E2E flow (R7, R9)
 - [x] E2E `e2e/image-prep.spec.ts` (Playwright, **credential-gated** on the employee credentials, skipping when absent — mirrors `e2e/calculator.spec.ts`) — signed out, `/image-prep` redirects to `/login`; signed in as an EMPLOYEE, the **Image prep** nav link is visible and navigates there (R1)
@@ -88,5 +90,7 @@ coverage-excluded (logic-free browser shell, exercised by E2E — see design.md)
   state; R15 → core `indexedToPixels` + component pipeline test; R16 →
   component pipeline-integrity test; R17 → core `downloadFileName` +
   component download + E2E; R18 → component busy tests + E2E; R19 → the
-  no-persistence implementation check + E2E (no writes anywhere). Every
-  R1–R19 traces to at least one test task.
+  no-persistence implementation check + E2E (no writes anywhere); R20 →
+  component palette-undo tests (baseline-disabled, restore-previous,
+  walk-back-to-baseline, re-posterize-resets, busy-disabled, Ctrl+Z). Every
+  R1–R20 traces to at least one test task.

@@ -138,3 +138,51 @@ were already modified by the leader before this session; not touched here.)
 - Feature NOT marked done in `feature_list.json` (reviewer gate).
 - Suggested manual smoke: `corepack pnpm dev` → sign in → /image-prep →
   drop any photo → Apply → Posterize → merge/snap → Download.
+
+---
+
+## Enhancement: palette undo (R20) — 2026-07-17
+
+Scoped, client-only follow-up (agreed with the human): an **Undo button for
+palette-cleanup edits**. Reverts merge / merge-similar / merge-tiny / snap one
+step at a time back to the fresh-posterize palette. No Redo. No worker,
+`lib/image-prep-core.ts`, schema, dependency, or persistence change.
+
+### Files modified
+
+- `components/image-prep/ImagePrep.tsx` — added a bounded palette undo history
+  **inside the `quantized` stage** (`history: { image; preview }[]`, cap
+  `MAX_PALETTE_HISTORY` = 20, oldest dropped). Posterize seeds the baseline;
+  each palette action pushes the new state; `handleUndo` is a **pure client pop**
+  (functional `setStage`, no worker request, no recompute) that restores the
+  prior `image`/`preview`. `canUndo = quantized && !busy && history.length > 1`.
+  A `Ctrl/Cmd+Z` window listener reuses `handleUndo` and only `preventDefault`s
+  when `canUndo`. Because the stack lives inside the stage, Apply / load discard
+  it structurally (R16 invariant preserved). Restoring the prior `image`
+  reference re-fires PalettePanel's `[image]` effect, clearing any in-progress
+  selection.
+- `components/image-prep/PalettePanel.tsx` — new `canUndo` / `onUndo` props and
+  a secondary-styled (`h-8 rounded-md border … disabled:opacity-50`) **Undo**
+  button beside the Palette heading.
+- `components/image-prep/__tests__/ImagePrep.test.tsx` — new `palette undo (R20)`
+  describe (+6 tests).
+- `specs/11_image_prep/{requirements.md,design.md,tasks.md}` — R20 requirement,
+  design note, task (done) + traceability line; out-of-scope bullet clarified.
+
+### Verification
+
+- `corepack pnpm typecheck` — clean.
+- `corepack pnpm lint` — 0 errors (only the 4 pre-existing WeekPlanner warnings).
+- `corepack pnpm test` — **853 tests / 61 files** (was 847 → +6). Core still
+  **100% branch**; `ImagePrep.tsx` 93.95% / `PalettePanel.tsx` 99.42% lines
+  (≥ 80% target). `pnpm build` not run per standing instruction.
+
+### R20 → tests (traceability)
+
+- R20 → `ImagePrep.test.tsx > palette undo (R20)`: "is disabled at the
+  fresh-posterize baseline", "enables after a palette action and restores the
+  previous palette/preview" (asserts no worker call), "walks back through
+  multiple actions to the baseline, then disables", "re-running Posterize resets
+  the history so Undo is disabled again", "disables Undo while the worker is
+  busy even with history to revert", "reverts the last palette action via
+  Ctrl+Z".

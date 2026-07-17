@@ -276,6 +276,21 @@ type Stage =
   Apply / Posterize / merge / snap buttons post to the worker (R5, R7).
 - Palette operations send the current `IndexedImage` to the worker and replace
   the `quantized` stage with the response (image + preview).
+- **Palette undo (R20):** the `quantized` stage carries a `history:
+  { image; preview }[]` stack whose last entry mirrors the current palette.
+  Posterize seeds it with the single baseline result; each palette-cleanup
+  action pushes the new state (dropping the oldest beyond `MAX_PALETTE_HISTORY`
+  = 20 so memory stays bounded on large images). `handleUndo` is a **pure
+  client-state pop** — `history.slice(0, -1)`, restore the new top's
+  `image`/`preview` — that posts **nothing** to the worker and recomputes
+  nothing; restoring the prior `image` reference also re-fires PalettePanel's
+  `[image]` effect, clearing any in-progress selection. `canUndo =
+  stage.kind === "quantized" && !busy && history.length > 1`. Because the stack
+  lives *inside* the quantized stage, Apply / load (which build a fresh
+  loaded/adjusted stage) discard it structurally, preserving the R16 invariant.
+  A `Ctrl/Cmd+Z` window listener calls the same `handleUndo` and only
+  `preventDefault`s when `canUndo`, so it never interferes elsewhere. There is
+  no Redo.
 - **Download (R17):** paint the working image to an offscreen canvas,
   `canvas.toBlob("image/png")` → object URL → temporary `<a download>` click →
   revoke. Filename via `downloadFileName(fileName)`.

@@ -82,3 +82,29 @@ touched — only Tailwind classes in the presentational components.
 
 Tests untouched (selectors are role/label/text-based, not layout classes).
 Verified green: typecheck · lint · Vitest (847 tests / 61 files).
+
+### Palette undo enhancement (2026-07-17)
+Scoped client-only enhancement to the shipped `11_image_prep` feature: an
+**Undo button for palette-cleanup edits** (merge / merge-similar / merge-tiny /
+snap), reverting one step at a time back to the freshly-posterized palette. No
+worker, `lib/image-prep-core.ts`, schema, dependency, or persistence change.
+
+- `components/image-prep/ImagePrep.tsx` — the `quantized` stage now carries a
+  bounded `history: { image; preview }[]` stack (cap 20, oldest dropped).
+  Posterize seeds the baseline (Undo disabled); each palette action pushes the
+  new state; `handleUndo` pops it as PURE client state (no worker re-post, no
+  recompute) and restores the prior `image` ref (which re-fires PalettePanel's
+  selection-reset effect). `Ctrl/Cmd+Z` reuses `handleUndo`, only
+  `preventDefault`ing when Undo applies. History lives inside the stage, so
+  Apply / load discard it structurally (R16 invariant intact).
+- `components/image-prep/PalettePanel.tsx` — new `canUndo`/`onUndo` props and a
+  secondary-styled **Undo** button beside the Palette heading.
+- Traceability: new **R20** in `specs/11_image_prep/requirements.md`, a design
+  note + task (done) in `design.md` / `tasks.md`.
+- Tests: +6 in `components/image-prep/__tests__/ImagePrep.test.tsx` (baseline
+  disabled, restore-previous with no worker call, walk-back-to-baseline,
+  re-posterize resets, busy-disabled, Ctrl+Z).
+
+Verified green: typecheck · lint · Vitest (**853 tests / 61 files**);
+`lib/image-prep-core.ts` still 100% branch, ImagePrep.tsx 93.9% / PalettePanel
+99.4% lines. `pnpm build` not run per standing instruction.

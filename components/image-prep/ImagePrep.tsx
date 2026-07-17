@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { AdjustPanel } from "@/components/image-prep/AdjustPanel";
 import { BeforeAfterPreview } from "@/components/image-prep/BeforeAfterPreview";
@@ -48,6 +48,19 @@ type LoadedFields = {
   downscaled: boolean;
 };
 
+/**
+ * One palette state in the undo history (R20): the image + preview pair a
+ * fresh posterize or a palette-cleanup action produces. Undo is a pure pop of
+ * this client-only stack — it never re-posts work to the worker.
+ */
+type PaletteState = { image: IndexedImage; preview: PixelBuffer };
+
+/**
+ * Cap the palette undo history so memory stays bounded on large images
+ * (R20). Older states beyond the cap are dropped from the front.
+ */
+const MAX_PALETTE_HISTORY = 20;
+
 type Stage =
   | { kind: "empty" }
   | ({ kind: "loaded" } & LoadedFields)
@@ -61,6 +74,14 @@ type Stage =
       histogram: Uint32Array | null;
       image: IndexedImage;
       preview: PixelBuffer;
+      /**
+       * Palette-cleanup undo stack (R20). The last entry mirrors the current
+       * `image`/`preview`; the fresh-posterize baseline is the sole entry, so
+       * Undo is available only once a cleanup action has pushed onto it. The
+       * whole stack lives inside the quantized stage, so Apply / load (which
+       * build a fresh loaded/adjusted stage) structurally discard it (R16).
+       */
+      history: PaletteState[];
     });
 
 /** Copy pixels into a fresh transferable ArrayBuffer (state stays intact). */
@@ -177,13 +198,18 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
         dither,
       });
       setOpError(null);
+      const image = deserializeIndexedImage(result.image);
+      const preview = payloadToPixels(result.preview);
+      // Fresh posterize = a new baseline: the history holds just this result,
+      // so Undo is disabled until a cleanup action pushes onto it (R20).
       setStage({
         kind: "quantized",
         ...loaded,
         adjusted: source,
         histogram,
-        image: deserializeIndexedImage(result.image),
-        preview: payloadToPixels(result.preview),
+        image,
+        preview,
+        history: [{ image, preview }],
       });
     } catch {
       setOpError("Posterizing the image failed — try again.");
@@ -202,15 +228,65 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
         action,
       });
       setOpError(null);
+      const image = deserializeIndexedImage(result.image);
+      const preview = payloadToPixels(result.preview);
+      // Push the new state so Undo can return to the prior one (R20), keeping
+      // the stack bounded by dropping the oldest state beyond the cap.
+      const history = [...current.history, { image, preview }];
       setStage({
         ...current,
-        image: deserializeIndexedImage(result.image),
-        preview: payloadToPixels(result.preview),
+        image,
+        preview,
+        history:
+          history.length > MAX_PALETTE_HISTORY
+            ? history.slice(history.length - MAX_PALETTE_HISTORY)
+            : history,
       });
     } catch {
       setOpError("Updating the palette failed — try again.");
     }
   }
+
+  // Undo is a pure client-state pop (R20): revert to the previous palette
+  // state without recomputing anything. Restoring the prior `image` reference
+  // also resets PalettePanel's in-progress selection (its effect keys on it).
+  const canUndo =
+    stage.kind === "quantized" && !busy && stage.history.length > 1;
+
+  const handleUndo = useCallback(() => {
+    setStage((current) => {
+      if (current.kind !== "quantized" || current.history.length <= 1) {
+        return current;
+      }
+      const history = current.history.slice(0, -1);
+      const previous = history[history.length - 1];
+      return {
+        ...current,
+        image: previous.image,
+        preview: previous.preview,
+        history,
+      };
+    });
+  }, []);
+
+  // Ctrl/Cmd+Z reverts the last palette action while the quantized stage is
+  // active and idle. We only preventDefault when Undo actually applies, so the
+  // shortcut never interferes elsewhere in the tool (R20).
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const undoCombo =
+        (event.ctrlKey || event.metaKey) &&
+        !event.shiftKey &&
+        (event.key === "z" || event.key === "Z");
+      if (!undoCombo || !canUndo) {
+        return;
+      }
+      event.preventDefault();
+      handleUndo();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [canUndo, handleUndo]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -255,6 +331,8 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
               image={stage.image}
               catalogEmpty={catalogColors.length === 0}
               busy={busy}
+              canUndo={canUndo}
+              onUndo={handleUndo}
               onMerge={(from, into) =>
                 void handlePaletteAction({ kind: "merge", from, into })
               }

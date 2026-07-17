@@ -437,6 +437,146 @@ describe("palette interactions (R10–R14)", () => {
   });
 });
 
+describe("palette undo (R20)", () => {
+  const undoButton = () => screen.getByRole("button", { name: "Undo" });
+
+  it("is disabled at the fresh-posterize baseline", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+    // Baseline history holds only the posterize result — nothing to revert to.
+    expect(undoButton()).toBeDisabled();
+  });
+
+  it("enables after a palette action and restores the previous palette/preview", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+    const callsAfterQuantize = mocks.requestSpy.mock.calls.length;
+
+    // Merge black into white → white 75%, black gone.
+    fireEvent.click(paletteEntry("#000000"));
+    fireEvent.click(paletteEntry("#ffffff"));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /#000000/ })).toBeNull(),
+    );
+    expect(paletteEntry("#ffffff")).toHaveTextContent("75.0%");
+    expect(undoButton()).toBeEnabled();
+
+    const callsAfterMerge = mocks.requestSpy.mock.calls.length;
+
+    // Undo restores the baseline palette + coverage, with NO worker call.
+    fireEvent.click(undoButton());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /#000000/ }),
+      ).toBeInTheDocument(),
+    );
+    expect(paletteEntry("#ffffff")).toHaveTextContent("25.0%");
+    expect(paletteEntry("#000000")).toHaveTextContent("50.0%");
+    expect(undoButton()).toBeDisabled(); // back at baseline
+    expect(mocks.requestSpy.mock.calls.length).toBe(callsAfterMerge);
+    expect(callsAfterMerge).toBeGreaterThan(callsAfterQuantize);
+  });
+
+  it("walks back through multiple actions to the baseline, then disables", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+
+    // Action 1: black into white (75% white).
+    fireEvent.click(paletteEntry("#000000"));
+    fireEvent.click(paletteEntry("#ffffff"));
+    await waitFor(() =>
+      expect(paletteEntry("#ffffff")).toHaveTextContent("75.0%"),
+    );
+    // Action 2: red into white (100% white).
+    fireEvent.click(paletteEntry("#c80000"));
+    fireEvent.click(paletteEntry("#ffffff"));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /#c80000/ })).toBeNull(),
+    );
+    expect(paletteEntry("#ffffff")).toHaveTextContent("100.0%");
+
+    const callsBeforeUndo = mocks.requestSpy.mock.calls.length;
+
+    // Undo action 2 → red returns, white back to 75%.
+    fireEvent.click(undoButton());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /#c80000/ }),
+      ).toBeInTheDocument(),
+    );
+    expect(paletteEntry("#ffffff")).toHaveTextContent("75.0%");
+    expect(undoButton()).toBeEnabled();
+
+    // Undo action 1 → baseline; Undo now disabled.
+    fireEvent.click(undoButton());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /#000000/ }),
+      ).toBeInTheDocument(),
+    );
+    expect(paletteEntry("#ffffff")).toHaveTextContent("25.0%");
+    expect(undoButton()).toBeDisabled();
+
+    // Undo is a pure client pop — it never re-posts work to the worker.
+    expect(mocks.requestSpy.mock.calls.length).toBe(callsBeforeUndo);
+  });
+
+  it("re-running Posterize resets the history so Undo is disabled again", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+
+    fireEvent.click(paletteEntry("#000000"));
+    fireEvent.click(paletteEntry("#ffffff"));
+    await waitFor(() => expect(undoButton()).toBeEnabled());
+
+    // A fresh Posterize establishes a new baseline (same source → same palette).
+    fireEvent.click(screen.getByRole("button", { name: "Posterize" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /#000000/ }),
+      ).toBeInTheDocument(),
+    );
+    expect(undoButton()).toBeDisabled();
+  });
+
+  it("disables Undo while the worker is busy even with history to revert", async () => {
+    const view = render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+    fireEvent.click(paletteEntry("#000000"));
+    fireEvent.click(paletteEntry("#ffffff"));
+    await waitFor(() => expect(undoButton()).toBeEnabled());
+
+    mocks.busyRef.value = true;
+    view.rerender(<ImagePrep catalogColors={CATALOG} />);
+    expect(undoButton()).toBeDisabled();
+  });
+
+  it("reverts the last palette action via Ctrl+Z", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+
+    fireEvent.click(paletteEntry("#000000"));
+    fireEvent.click(paletteEntry("#ffffff"));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /#000000/ })).toBeNull(),
+    );
+
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /#000000/ }),
+      ).toBeInTheDocument(),
+    );
+    expect(paletteEntry("#000000")).toHaveTextContent("50.0%");
+  });
+});
+
 describe("pipeline integrity + download (R15, R16, R17)", () => {
   it("re-applying adjustments discards the quantized palette (R16)", async () => {
     render(<ImagePrep catalogColors={CATALOG} />);

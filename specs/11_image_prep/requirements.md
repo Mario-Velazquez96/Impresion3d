@@ -77,7 +77,10 @@ worker is a thin, stateless dispatcher over the pure core.
   manual pixel editing. (The automatic proportional **downscale** of oversized
   images is a working-size guard, not a crop tool.)
 - Saving results to Supabase Storage or any DB table; linking a prepped image
-  to a `Print`; history/undo beyond the stage invalidation described below.
+  to a `Print`. **In-session, client-only undo of palette-cleanup edits is in
+  scope (R20)**; anything beyond it — persisted/cross-reload undo, a Redo
+  stack, or undoing Posterize/Apply/file-load (all re-runnable via their own
+  controls) — is not.
 - HueForge project files (`.hfp`), layer/slice calculations, or filament TD
   values — the output is a plain PNG.
 - Server-side image processing; everything after the catalog read is
@@ -192,6 +195,23 @@ of any kind occurs from this feature (no model, no migration, no RLS change,
 no Server Action, no route handler, no Storage write, no `localStorage`); its
 only server interaction is the page's **read** of the `Color` catalog, and a
 reload starts from a fresh, empty tool.
+
+**R20 (Event-driven):** While a quantized result exists, the system shall keep
+a bounded, client-only **undo history of palette states** (each the
+`{ image, preview }` pair a palette operation produces) capped at a sane depth
+(oldest states dropped beyond the cap), such that: a fresh Posterize
+establishes the baseline as the sole history entry with **Undo disabled**; each
+successful palette-cleanup action (tap-two **merge**, **merge-similar**,
+**merge-tiny**, **snap-to-filaments**) pushes the prior state so that when the
+user activates **Undo** the system reverts to it — repeatable back to the
+fresh-posterize baseline, at which point Undo is disabled again — **without
+re-posting work to the Web Worker or recomputing anything** (a pure client-state
+pop that also clears any in-progress palette selection). Undo shall be **disabled
+while a worker operation is running** and whenever no quantized result exists,
+and re-running Posterize, applying adjustments, or loading a new file (which all
+discard the quantized stage) shall reset or discard the history accordingly.
+Undo does **not** revert the Posterize itself, Apply, or file load, and there is
+**no Redo**.
 
 ## Acceptance
 

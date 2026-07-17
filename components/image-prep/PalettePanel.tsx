@@ -18,12 +18,15 @@ import {
  * to select it, tap ANOTHER to merge selected→tapped; tapping the selected
  * entry again deselects without merging (R10). Below: merge-similar,
  * merge-tiny, and snap-to-filaments controls; snap is disabled with an
- * explanatory note when the catalog is empty (R14).
+ * explanatory note when the catalog is empty (R14). An Undo button reverts the
+ * last palette-cleanup action back toward the freshly-posterized palette (R20).
  */
 export function PalettePanel({
   image,
   catalogEmpty,
   busy,
+  canUndo,
+  onUndo,
   onMerge,
   onMergeSimilar,
   onMergeTiny,
@@ -32,6 +35,10 @@ export function PalettePanel({
   image: IndexedImage;
   catalogEmpty: boolean;
   busy: boolean;
+  /** Whether a prior palette state exists to revert to (R20). */
+  canUndo: boolean;
+  /** Revert the last palette-cleanup action (merge / snap) (R20). */
+  onUndo: () => void;
   onMerge: (from: number, into: number) => void;
   onMergeSimilar: (threshold: number) => void;
   onMergeTiny: (coveragePercentThreshold: number) => void;
@@ -96,9 +103,20 @@ export function PalettePanel({
 
   return (
     <section className="flex flex-col gap-3 rounded-lg border p-4">
-      <h2 className="text-sm font-semibold">Palette</h2>
+      <div className="flex items-start justify-between gap-2">
+        <h2 className="text-sm font-semibold">Palette</h2>
+        <button
+          type="button"
+          disabled={!canUndo}
+          onClick={onUndo}
+          className="h-8 shrink-0 rounded-md border px-2 text-xs hover:bg-accent disabled:opacity-50"
+        >
+          Undo
+        </button>
+      </div>
       <p className="text-xs text-muted-foreground">
-        Tap an entry, then tap another to merge the first into the second.
+        Tap an entry, then tap another to merge the first into the second. Undo
+        reverts palette edits back to the freshly-posterized colors.
       </p>
 
       <div className="flex flex-col gap-2">
