@@ -227,7 +227,7 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
       ) : null}
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-        <div className="flex flex-1 flex-col gap-4">
+        <div className="flex w-full flex-col gap-4 lg:w-80 lg:shrink-0">
           <ImageDropzone onLoaded={handleLoaded} info={info} busy={busy} />
 
           <AdjustPanel
@@ -275,7 +275,7 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
         </div>
 
         {hasImage && workingImage ? (
-          <div className="w-full lg:w-96">
+          <div className="w-full flex-1 lg:sticky lg:top-4 lg:self-start">
             <BeforeAfterPreview
               original={stage.original}
               working={workingImage}

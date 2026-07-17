@@ -45,7 +45,7 @@ export function PosterizePanel({
           value={colors}
           disabled={inactive}
           onChange={(event) => setColors(Number(event.target.value))}
-          className="flex-1"
+          className="max-w-[12rem] flex-1"
         />
         <span className="w-10 text-right text-xs tabular-nums">{colors}</span>
       </div>

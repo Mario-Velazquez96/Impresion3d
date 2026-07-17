@@ -76,20 +76,20 @@ export function BeforeAfterPreview({
       <h2 className="text-sm font-semibold">Preview</h2>
 
       <div className="flex flex-wrap gap-4">
-        <figure className="flex min-w-0 flex-1 flex-col gap-1">
+        <figure className="flex min-w-[16rem] flex-1 basis-72 flex-col gap-1">
           <figcaption className="text-xs font-medium">Original</figcaption>
           <canvas
             ref={originalRef}
             aria-label="Original image"
-            className="w-full rounded-md border"
+            className="mx-auto h-auto max-h-[70vh] w-full max-w-full rounded-md border object-contain"
           />
         </figure>
-        <figure className="flex min-w-0 flex-1 flex-col gap-1">
+        <figure className="flex min-w-[16rem] flex-1 basis-72 flex-col gap-1">
           <figcaption className="text-xs font-medium">Preview</figcaption>
           <canvas
             ref={workingRef}
             aria-label="Working image preview"
-            className="w-full rounded-md border"
+            className="mx-auto h-auto max-h-[70vh] w-full max-w-full rounded-md border object-contain"
           />
         </figure>
       </div>

@@ -61,7 +61,7 @@ export function AdjustPanel({
         value={value}
         disabled={inactive}
         onChange={(event) => setValue(Number(event.target.value))}
-        className="flex-1"
+        className="max-w-[12rem] flex-1"
       />
       <span className="w-10 text-right text-xs tabular-nums">{value}</span>
     </div>

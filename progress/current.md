@@ -59,3 +59,26 @@ NEVER run `pnpm build` while the dev server is running — both share `.next` an
 the build corrupts the dev server's CSS chunks (symptom: unstyled app, 404 on
 `/_next/static/css/app/layout.css`). Verify changes with typecheck/lint/test
 while dev is up; stop the server first if a build is truly needed.
+
+## UI refinements
+
+### 11_image_prep preview layout (2026-07-17)
+Presentational-only polish in response to live feedback ("image too small,
+adjustment bars too wide"). No pipeline/worker/`lib/image-prep-core.ts` logic
+touched — only Tailwind classes in the presentational components.
+
+- `components/image-prep/ImagePrep.tsx` — swapped column proportions: controls
+  moved to a narrow fixed column (`lg:w-80 lg:shrink-0`) and the preview column
+  now takes the majority of the row (`flex-1`) and is `lg:sticky lg:top-4` so it
+  stays visible while scrolling the controls. Mobile stays single-column stacked.
+- `components/image-prep/BeforeAfterPreview.tsx` — canvases grow with the wider
+  column; figures gain `basis-72 min-w-[16rem]` so Original/Preview sit
+  side-by-side when the column is wide and gracefully wrap to stacked when narrow.
+  Canvases capped with `max-h-[70vh] max-w-full object-contain` so a 2000×2000
+  image never overflows the viewport and aspect ratio is preserved.
+- `components/image-prep/AdjustPanel.tsx` and `PosterizePanel.tsx` — range inputs
+  capped at `max-w-[12rem]` so the bars aren't full-width; label/slider/value row
+  structure and `htmlFor`/`id` links unchanged.
+
+Tests untouched (selectors are role/label/text-based, not layout classes).
+Verified green: typecheck · lint · Vitest (847 tests / 61 files).
