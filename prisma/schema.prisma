@@ -36,6 +36,11 @@ model User {
   // 07_weekly_planning: week plans this user created. The FK on WeekPlan uses
   // onDelete: Restrict, so a user who has authored a week plan cannot be deleted.
   weekPlans WeekPlan[]
+
+  // 10_sales_and_balance: withdrawals this user recorded. The FK on Withdrawal
+  // uses onDelete: Restrict, so a user who has recorded a withdrawal cannot be
+  // deleted.
+  withdrawals Withdrawal[]
 }
 
 // ── Catalogs (02_catalog_management) ─────────────────────────────────────────
@@ -216,6 +221,12 @@ model Print {
   // be deleted (the back-relation 06 deferred, added now).
   weekItems WeekPlanItem[]
 
+  // 10_sales_and_balance: sales of this print. The FK on Sale uses
+  // onDelete: Restrict, so a print that has been sold cannot be deleted (the
+  // finances service also registers a print reference counter for the friendly
+  // pre-check).
+  sales Sale[]
+
   @@index([printTypeId])
   @@index([name])
 }
@@ -301,4 +312,65 @@ model WeekPlanItem {
   position   Int
 
   @@index([weekPlanId, dayOfWeek, position])
+}
+
+// ── Sales & balance (10_sales_and_balance) ───────────────────────────────────
+// Two ledgers — money IN (Sale) and money OUT (Withdrawal) — and one figure
+// derived from them.
+//
+// THE BALANCE IS NOT STORED. There is deliberately no balance column anywhere:
+// `balance = sum(Sale.amount) - sum(Withdrawal.amount)` is computed on every read
+// (lib/services/finances.ts + lib/finances-core.ts). A stored total would drift
+// out of sync with the rows it summarizes; the ledgers are the source of truth.
+//
+// EXPENSES ARE DELIBERATELY EXCLUDED FROM THE BALANCE — this is a product
+// decision, NOT a bug, and must not be "fixed". The balance answers "how much
+// revenue came in that hasn't been taken out yet", NOT "what is truly in the
+// bank". Supply spending stays a separate 05_expense_tracking concern with its
+// own page. The /finances page labels the figure accordingly.
+//
+// `amount` is a Decimal(10,2) on both models — never a JS float — so amounts
+// round-trip with exact two-decimal precision (the Expense.cost convention).
+
+// A sale of a print. The print FK is REQUIRED and onDelete: Restrict (a print
+// with sales cannot be deleted; the finances service also registers a print
+// reference counter for the friendly pre-check) — mirroring Expense.supplyType.
+// `buyer` and `notes` are free-text and optional. Indexed by `date` (list order /
+// future per-period reports) and `printId` (future per-print revenue reports).
+// RLS lets any authenticated user read/write; the server layer requires a signed-
+// in user to record, and gates delete to Admins.
+model Sale {
+  id        String   @id @default(cuid())
+  amount    Decimal  @db.Decimal(10, 2)
+  date      DateTime
+  print     Print    @relation(fields: [printId], references: [id], onDelete: Restrict)
+  printId   String
+  buyer     String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([date])
+  @@index([printId])
+}
+
+// Money taken out of the business account. `reason` is REQUIRED (a withdrawal
+// with no stated reason is not auditable). `recordedBy` is a required User FK set
+// SERVER-SIDE from the authenticated actor — the audit trail of who took money
+// out — with onDelete: Restrict, so a user who has recorded a withdrawal cannot
+// be deleted (mirrors WeekPlan.createdBy). Indexed by `date` (list order) and
+// `recordedById` (per-user audit). RLS lets any authenticated user read/write;
+// recording AND deleting are gated to Admins in the app layer.
+model Withdrawal {
+  id           String   @id @default(cuid())
+  amount       Decimal  @db.Decimal(10, 2)
+  date         DateTime
+  reason       String
+  recordedBy   User     @relation(fields: [recordedById], references: [id], onDelete: Restrict)
+  recordedById String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([date])
+  @@index([recordedById])
 }

@@ -70,6 +70,13 @@
       "sdd": true,
       "status": "done",
       "depends_on": ["06_print_inventory"]
+    },
+    {
+      "name": "10_sales_and_balance",
+      "description": "Sales ledger + account balance + withdrawals. Sale model (amount Decimal(10,2), date, required Print FK onDelete: Restrict, optional buyer + notes) and Withdrawal model (amount Decimal(10,2), date, required reason, recordedBy User FK) with RLS and migration. Balance is DERIVED, never stored: sum(sales) - sum(withdrawals); Expenses are intentionally NOT part of it. A /finances page shows the balance headline plus the sales and withdrawals lists. Any authenticated user records sales; recording AND deleting withdrawals is Admin-only. Pure calculation core, fully unit-tested.",
+      "sdd": true,
+      "status": "done",
+      "depends_on": ["06_print_inventory", "01_auth_and_user_management"]
     }
   ]
 }

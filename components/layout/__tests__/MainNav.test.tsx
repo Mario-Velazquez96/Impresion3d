@@ -26,6 +26,10 @@ describe("MainNav", () => {
       "href",
       "/calculator",
     );
+    expect(screen.getByRole("link", { name: "Finances" })).toHaveAttribute(
+      "href",
+      "/finances",
+    );
   });
 
   // The calculator is open to EVERY authenticated user, so its link lives outside
@@ -37,6 +41,20 @@ describe("MainNav", () => {
       expect(screen.getByRole("link", { name: "Calculator" })).toHaveAttribute(
         "href",
         "/calculator",
+      );
+    },
+  );
+
+  // /finances is open to EVERY authenticated user — an employee views the balance
+  // and both ledgers — so its link lives outside the showAdmin block and must
+  // render in both navs (10_sales_and_balance R1).
+  it.each([false, true])(
+    "renders the Finances link when showAdmin is %s (not admin-only)",
+    (showAdmin) => {
+      render(<MainNav showAdmin={showAdmin} />);
+      expect(screen.getByRole("link", { name: "Finances" })).toHaveAttribute(
+        "href",
+        "/finances",
       );
     },
   );

@@ -5,8 +5,11 @@ import Link from "next/link";
  * so the same links always appear and the two navs cannot drift apart. The
  * admin-only links (Users, Catalogs) render only when `showAdmin` is true.
  *
- * Calculator sits deliberately OUTSIDE the `showAdmin` block: /calculator is open
- * to every authenticated user, so the link must appear in both navs (09 R1).
+ * Calculator and Finances sit deliberately OUTSIDE the `showAdmin` block:
+ * /calculator (09 R1) and /finances (10 R1) are open to every authenticated user,
+ * so both links must appear in both navs. On /finances an employee views the
+ * balance and both ledgers; only the Admin-only controls inside the page are
+ * gated (by the server actions — the UI hiding is UX).
  */
 export function MainNav({ showAdmin }: { showAdmin: boolean }) {
   return (
@@ -37,6 +40,12 @@ export function MainNav({ showAdmin }: { showAdmin: boolean }) {
         className="text-sm text-muted-foreground hover:text-foreground"
       >
         Calculator
+      </Link>
+      <Link
+        href="/finances"
+        className="text-sm text-muted-foreground hover:text-foreground"
+      >
+        Finances
       </Link>
       {showAdmin ? (
         <>

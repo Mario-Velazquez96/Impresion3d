@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { ForbiddenError, requireAdmin, requireUser } from "@/lib/auth";
+import { isPrintInUse } from "@/lib/services/print-references";
 import {
   createPrint,
   deletePrint,
@@ -207,10 +208,20 @@ export async function updatePrintAction(
   return { ok: true };
 }
 
+/** Friendly rejection for a print that a sale (10_sales_and_balance) references. */
+const PRINT_IN_USE_MESSAGE =
+  "This print has sales recorded and cannot be deleted";
+
 /**
  * Delete a print (R7, R9). Admin-only: a non-admin is rejected before any DB or
  * Storage work, so nothing is written/removed. The service removes the PrintColor
  * rows + the row in a transaction, then the Storage object after the commit.
+ *
+ * A print that is REFERENCED cannot be deleted (10_sales_and_balance R9): the
+ * `Sale.printId` FK is `onDelete: Restrict`, which is the hard guarantee, and the
+ * pre-check below is the friendly path in front of it — same pairing as
+ * actions/catalogs.ts#deleteCatalog. Both paths return the SAME message, so the
+ * user sees one behaviour whichever fires.
  */
 export async function deletePrintAction(
   _prevState: PrintActionResult | null,
@@ -224,9 +235,19 @@ export async function deletePrintAction(
     return { ok: false, error: "Missing id" };
   }
 
+  // Friendly pre-check: block before attempting the delete (10 R9).
+  if (await isPrintInUse(id)) {
+    return { ok: false, error: PRINT_IN_USE_MESSAGE };
+  }
+
   try {
     await deletePrint(id);
-  } catch {
+  } catch (error) {
+    // DB Restrict backstop: a reference that slipped past the pre-check raises
+    // P2003 (foreign-key violation). Surface the same friendly in-use message.
+    if (isForeignKeyViolation(error)) {
+      return { ok: false, error: PRINT_IN_USE_MESSAGE };
+    }
     return { ok: false, error: "Failed to delete print" };
   }
 

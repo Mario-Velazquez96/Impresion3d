@@ -47,6 +47,13 @@ vi.mock("@/lib/storage", () => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
+// The print delete-guard pre-check (10_sales_and_balance R9). Defaults to "not in
+// use" in beforeEach so every pre-existing test behaves exactly as before.
+const { isPrintInUseMock } = vi.hoisted(() => ({ isPrintInUseMock: vi.fn() }));
+vi.mock("@/lib/services/print-references", () => ({
+  isPrintInUse: (...a: unknown[]) => isPrintInUseMock(...a),
+}));
+
 import {
   createPrintAction,
   deletePrintAction,
@@ -77,6 +84,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   requireUserMock.mockResolvedValue({ id: "u1", role: "EMPLOYEE" });
   requireAdminMock.mockResolvedValue({ id: "a1", role: "ADMIN" });
+  isPrintInUseMock.mockResolvedValue(false);
 });
 
 describe("createPrintAction (R5, R10)", () => {
@@ -223,5 +231,72 @@ describe("deletePrintAction (R7, R9 — Admin-only)", () => {
     const result = await deletePrintAction(null, new FormData());
     expect(result.ok).toBe(false);
     expect(deletePrintMock).not.toHaveBeenCalled();
+  });
+});
+
+// 10_sales_and_balance R9: a print that has sales cannot be deleted. The FK
+// Restrict on Sale.printId is the HARD guarantee (surfacing as P2003); the
+// reference-counter pre-check is the friendly path in front of it. Both must
+// return the SAME message, so the user sees one behaviour.
+describe("deletePrintAction — the sales delete-guard (10 R9)", () => {
+  function deleteForm(): FormData {
+    const fd = new FormData();
+    fd.set("id", "p1");
+    return fd;
+  }
+
+  it("the pre-check blocks an in-use print BEFORE attempting the delete", async () => {
+    isPrintInUseMock.mockResolvedValue(true);
+
+    const result = await deletePrintAction(null, deleteForm());
+
+    expect(result).toEqual({
+      ok: false,
+      error: "This print has sales recorded and cannot be deleted",
+    });
+    expect(isPrintInUseMock).toHaveBeenCalledWith("p1");
+    expect(deletePrintMock).not.toHaveBeenCalled();
+  });
+
+  it("the P2003 BACKSTOP maps to the SAME message when a reference slips past the pre-check", async () => {
+    isPrintInUseMock.mockResolvedValue(false);
+    deletePrintMock.mockRejectedValue({ code: "P2003" });
+
+    const result = await deletePrintAction(null, deleteForm());
+
+    expect(result).toEqual({
+      ok: false,
+      error: "This print has sales recorded and cannot be deleted",
+    });
+    expect(deletePrintMock).toHaveBeenCalledWith("p1");
+  });
+
+  it("still reports a NON-FK failure as the generic delete error", async () => {
+    isPrintInUseMock.mockResolvedValue(false);
+    deletePrintMock.mockRejectedValue(new Error("storage down"));
+
+    const result = await deletePrintAction(null, deleteForm());
+
+    expect(result).toEqual({ ok: false, error: "Failed to delete print" });
+  });
+
+  it("runs the pre-check only AFTER the admin gate (a non-admin never reaches it)", async () => {
+    requireAdminMock.mockRejectedValue(new ForbiddenError("Forbidden"));
+
+    const result = await deletePrintAction(null, deleteForm());
+
+    expect(result.ok).toBe(false);
+    expect(isPrintInUseMock).not.toHaveBeenCalled();
+    expect(deletePrintMock).not.toHaveBeenCalled();
+  });
+
+  it("deletes normally when the print has no sales", async () => {
+    isPrintInUseMock.mockResolvedValue(false);
+    deletePrintMock.mockResolvedValue({ photoPath: null });
+
+    const result = await deletePrintAction(null, deleteForm());
+
+    expect(result.ok).toBe(true);
+    expect(deletePrintMock).toHaveBeenCalledWith("p1");
   });
 });

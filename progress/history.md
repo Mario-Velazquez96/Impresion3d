@@ -179,3 +179,23 @@
 **Reports:** `progress/impl_09_price_calculator.md`, `progress/review_09_price_calculator.md`.
 
 ---
+
+## 10_sales_and_balance — DONE (2026-07-16)
+
+**Feature:** Sales ledger + withdrawals + a DERIVED account balance on `/finances`. spec_author → implement → reviewer-APPROVED. Gate decisions: expenses deliberately EXCLUDED from the balance; parallel print-reference registry approved instead of widening `CatalogKey`.
+
+**Delivered:** `Sale` (`amount Decimal(10,2)`, date, required `printId` FK `onDelete: Restrict`, optional buyer + notes) + `Withdrawal` (`amount Decimal(10,2)`, date, required reason, `recordedById` → User Restrict) models + `Print.sales` / `User.withdrawals` back-relations; migrations `20260716120000_sales_and_withdrawals` + `20260716120100_sales_and_withdrawals_rls` (RLS **ENABLE + FORCE** with four `TO authenticated` policies on both tables) — **both APPLIED to staging** (`prisma migrate status` → "Database schema is up to date", 16 migrations); `lib/finances-core.ts` — the PURE core (**zero imports**) doing integer-cent arithmetic (`toCents`/`fromCents`/`sumAmountCents`/`sanitizeAmountCents`/`computeBalance`) at **100% branch coverage**; `lib/services/finances.ts` (`server-only`, two `_sum` aggregates in one `Promise.all` per read, date-desc lists with relations in one query, registers a print reference counter); `lib/services/print-references.ts` — the approved **parallel** registry mirroring the 02 catalog hook, plus an additive `isPrintInUse` pre-check + P2003 backstop in `actions/prints.ts` (`CatalogKey`, `schemaForCatalog`, `delegateFor` and the Admin catalogs UI untouched); `lib/validation/finance.ts`; `actions/sales.ts` + `actions/withdrawals.ts`; Server-Component `/finances` page + `BalanceCard` + client islands SalesTable/WithdrawalsTable/SaleFormDialog/WithdrawalFormDialog/DeleteSaleButton/DeleteWithdrawalButton; `Finances` nav link outside the admin block. No new deps/env vars.
+
+**The three invariants:** (1) **Balance is DERIVED, never stored** — no balance/total/cache column exists in the schema or either migration; re-derived from `sum(sales) − sum(withdrawals)` on every read. (2) **Expenses are DELIBERATELY excluded** — a documented product decision, not a bug: the service never references `db.expense` (asserted by a test that fails if `aggregate`/`findMany`/`count` is touched), restated in the schema comment, the migration header, the service/core headers, and rendered on the page as "Sales minus withdrawals — does not include expenses". (3) **No JS float in the money path** — `Decimal(10,2)` → Postgres `_sum` → `.toString()` → integer cents → `formatCurrency` once at the display edge; proved by a service test whose Decimal stub throws from `toNumber()`.
+
+**Authorization:** any authenticated user records a sale (`requireUser`); **ADMIN-only** for sale deletes and for recording AND deleting withdrawals (`requireAdmin` first, before Zod — "rejects BEFORE validation" asserted). `Withdrawal.recordedById` is **server-assigned** from `requireAdmin()`'s actor and absent from the schema — a `recordedById` planted in the FormData is provably ignored (client cannot spoof it).
+
+**Requirements:** R1–R17 all satisfied and traced to tests.
+
+**Verification:** typecheck 0 errors, lint 0 errors (4 pre-existing unrelated warnings), Vitest **57 test files / 761 tests**, 0 failures; `lib/finances-core.ts` **100% statements/branch/functions/lines** (spec's hard target met), services + validation 100%, `components/finances/` 96.33% lines. Worked example verified exactly (sales 1350.25 − withdrawals 850.25 = **500.00**; the $2,000 expense changes nothing). Build intentionally skipped during dev (running dev server shares `.next`); the Vercel preview is the build target. Reviewer independently reproduced.
+
+**Outstanding (credential-gated, dev/staging only — never production):** run Playwright E2E (`e2e/finances.spec.ts`) + RLS-denial (`e2e/finances-rls.spec.ts`) after setting `.env.local` + E2E account vars.
+
+**Reports:** `progress/impl_10_sales_and_balance.md`, `progress/review_10_sales_and_balance.md`.
+
+---
