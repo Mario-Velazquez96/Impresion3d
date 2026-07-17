@@ -122,66 +122,78 @@ export function PalettePanel({
       </div>
 
       <div className="flex flex-col gap-2 border-t pt-3">
-        <div className="flex items-center gap-2">
-          <label
-            htmlFor="merge-similar-threshold"
-            className="w-40 text-xs font-medium"
-          >
-            Similarity threshold
-          </label>
-          <input
-            id="merge-similar-threshold"
-            type="range"
-            min={0}
-            max={150}
-            step={1}
-            value={mergeDistance}
-            disabled={busy}
-            onChange={(event) => setMergeDistance(Number(event.target.value))}
-            className="flex-1"
-          />
-          <span className="w-10 text-right text-xs tabular-nums">
-            {mergeDistance}
-          </span>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onMergeSimilar(mergeDistance)}
-            className="h-8 rounded-md border px-2 text-xs hover:bg-accent disabled:opacity-50"
-          >
-            Merge similar
-          </button>
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor="merge-similar-threshold"
+              className="w-40 text-xs font-medium"
+            >
+              Similarity threshold
+            </label>
+            <input
+              id="merge-similar-threshold"
+              type="range"
+              min={0}
+              max={150}
+              step={1}
+              value={mergeDistance}
+              disabled={busy}
+              onChange={(event) => setMergeDistance(Number(event.target.value))}
+              className="flex-1"
+            />
+            <span className="w-10 text-right text-xs tabular-nums">
+              {mergeDistance}
+            </span>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onMergeSimilar(mergeDistance)}
+              className="h-8 rounded-md border px-2 text-xs hover:bg-accent disabled:opacity-50"
+            >
+              Merge similar
+            </button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Merge similar collapses palette colors closer than this distance
+            into one. Higher merges more aggressively.
+          </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <label
-            htmlFor="merge-tiny-threshold"
-            className="w-40 text-xs font-medium"
-          >
-            Tiny coverage (%)
-          </label>
-          <input
-            id="merge-tiny-threshold"
-            type="range"
-            min={0}
-            max={20}
-            step={1}
-            value={tinyPercent}
-            disabled={busy}
-            onChange={(event) => setTinyPercent(Number(event.target.value))}
-            className="flex-1"
-          />
-          <span className="w-10 text-right text-xs tabular-nums">
-            {tinyPercent}
-          </span>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onMergeTiny(tinyPercent)}
-            className="h-8 rounded-md border px-2 text-xs hover:bg-accent disabled:opacity-50"
-          >
-            Merge tiny
-          </button>
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor="merge-tiny-threshold"
+              className="w-40 text-xs font-medium"
+            >
+              Tiny coverage (%)
+            </label>
+            <input
+              id="merge-tiny-threshold"
+              type="range"
+              min={0}
+              max={20}
+              step={1}
+              value={tinyPercent}
+              disabled={busy}
+              onChange={(event) => setTinyPercent(Number(event.target.value))}
+              className="flex-1"
+            />
+            <span className="w-10 text-right text-xs tabular-nums">
+              {tinyPercent}
+            </span>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onMergeTiny(tinyPercent)}
+              className="h-8 rounded-md border px-2 text-xs hover:bg-accent disabled:opacity-50"
+            >
+              Merge tiny
+            </button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Merge tiny absorbs any palette color covering less than this % of
+            the image into its nearest neighbor.
+          </p>
         </div>
       </div>
 

@@ -50,15 +50,21 @@ export function PosterizePanel({
         <span className="w-10 text-right text-xs tabular-nums">{colors}</span>
       </div>
 
-      <label className="flex items-center gap-2 text-xs font-medium">
-        <input
-          type="checkbox"
-          checked={dither}
-          disabled={inactive}
-          onChange={(event) => setDither(event.target.checked)}
-        />
-        Dithering (Floyd–Steinberg)
-      </label>
+      <div className="flex flex-col gap-1">
+        <label className="flex items-center gap-2 text-xs font-medium">
+          <input
+            type="checkbox"
+            checked={dither}
+            disabled={inactive}
+            onChange={(event) => setDither(event.target.checked)}
+          />
+          Dithering (Floyd–Steinberg)
+        </label>
+        <p className="text-xs text-muted-foreground">
+          Diffuses color banding into a fine speckle. Leave off for flat, solid
+          bands — they print cleaner in HueForge.
+        </p>
+      </div>
 
       <div>
         <button

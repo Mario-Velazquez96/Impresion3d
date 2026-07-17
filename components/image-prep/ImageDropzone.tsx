@@ -59,14 +59,14 @@ export function ImageDropzone({
   }
 
   return (
-    <section className="flex flex-col gap-3 rounded-lg border p-4">
+    <section className="flex min-w-0 flex-col gap-3 overflow-hidden rounded-lg border p-4">
       <h2 className="text-sm font-semibold">Image</h2>
 
       <div
         data-testid="image-dropzone"
         onDragOver={(event) => event.preventDefault()}
         onDrop={handleDrop}
-        className="flex flex-col items-start gap-2 rounded-md border border-dashed p-4"
+        className="flex min-w-0 flex-col items-start gap-2 overflow-hidden rounded-md border border-dashed p-4"
       >
         <label htmlFor="image-file" className="text-xs font-medium">
           Source image (PNG, JPEG, or WebP)
@@ -85,7 +85,7 @@ export function ImageDropzone({
             // Allow re-selecting the same file to reload it.
             event.target.value = "";
           }}
-          className="text-sm"
+          className="w-full max-w-full text-sm"
         />
         <p className="text-xs text-muted-foreground">
           Drop a file here or pick one — it never leaves your browser.
