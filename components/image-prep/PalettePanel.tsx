@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import {
   DEFAULT_MERGE_DISTANCE,
@@ -12,14 +12,16 @@ import {
 } from "@/lib/image-prep-core";
 
 /**
- * Palette cleanup panel (R9–R14): the quantized palette split into Neutrals
- * (light→dark) and Colors (by hue), each entry a toggle button with swatch,
- * hex, coverage % — and the filament name once snapped (R13). Tap one entry
- * to select it, tap ANOTHER to merge selected→tapped; tapping the selected
- * entry again deselects without merging (R10). Below: merge-similar,
- * merge-tiny, and snap-to-filaments controls; snap is disabled with an
- * explanatory note when the catalog is empty (R14). An Undo button reverts the
- * last palette-cleanup action back toward the freshly-posterized palette (R20).
+ * Palette cleanup panel (R9–R14, R21): the quantized palette split into
+ * Neutrals (light→dark) and Colors (by hue), each entry a toggle button with
+ * swatch, hex, coverage % — and the filament name once snapped (R13). Tap one
+ * entry to select it, tap ANOTHER to merge selected→tapped; tapping the
+ * selected entry again deselects without merging (R10). Selection is
+ * CONTROLLED by the island so "Pick from image" (R21) can drive it from a
+ * canvas click. Below: merge-similar, merge-tiny, and snap-to-filaments
+ * controls; snap is disabled with an explanatory note when the catalog is
+ * empty (R14). An Undo button reverts the last palette-cleanup action back
+ * toward the freshly-posterized palette (R20).
  */
 export function PalettePanel({
   image,
@@ -27,6 +29,10 @@ export function PalettePanel({
   busy,
   canUndo,
   onUndo,
+  selected,
+  onSelectedChange,
+  pickMode,
+  onTogglePickMode,
   onMerge,
   onMergeSimilar,
   onMergeTiny,
@@ -39,38 +45,49 @@ export function PalettePanel({
   canUndo: boolean;
   /** Revert the last palette-cleanup action (merge / snap) (R20). */
   onUndo: () => void;
+  /** The currently selected entry index, lifted to the island (R10, R21). */
+  selected: number | null;
+  /** Set the selected entry (tap-to-select / deselect) (R10, R21). */
+  onSelectedChange: (next: number | null) => void;
+  /** Whether the eyedropper "Pick from image" mode is active (R21). */
+  pickMode: boolean;
+  /** Toggle the eyedropper mode on/off (R21). */
+  onTogglePickMode: () => void;
   onMerge: (from: number, into: number) => void;
   onMergeSimilar: (threshold: number) => void;
   onMergeTiny: (coveragePercentThreshold: number) => void;
   onSnap: () => void;
 }) {
-  const [selected, setSelected] = useState<number | null>(null);
   const [mergeDistance, setMergeDistance] = useState(DEFAULT_MERGE_DISTANCE);
   const [tinyPercent, setTinyPercent] = useState(
     DEFAULT_TINY_COVERAGE_PERCENT,
   );
 
-  // A new palette (merge/snap result or fresh quantize) invalidates any
-  // selection — a stale index would point at the wrong entry.
-  useEffect(() => {
-    setSelected(null);
-  }, [image]);
-
   const { neutrals, colors } = classifyPalette(image);
 
   function handleTap(index: number) {
     if (selected === null) {
-      setSelected(index);
+      onSelectedChange(index);
       return;
     }
     if (selected === index) {
-      setSelected(null);
+      onSelectedChange(null);
       return;
     }
     const from = selected;
-    setSelected(null);
+    onSelectedChange(null);
     onMerge(from, index);
   }
+
+  const selectedEntry =
+    selected !== null && selected < image.entries.length
+      ? image.entries[selected]
+      : null;
+  const selectedHex = selectedEntry
+    ? selectedEntry.catalog
+      ? selectedEntry.catalog.hex
+      : rgbToHex(selectedEntry.color)
+    : null;
 
   const entryButton = (index: number) => {
     const entry = image.entries[index];
@@ -105,19 +122,49 @@ export function PalettePanel({
     <section className="flex flex-col gap-3 rounded-lg border p-4">
       <div className="flex items-start justify-between gap-2">
         <h2 className="text-sm font-semibold">Palette</h2>
-        <button
-          type="button"
-          disabled={!canUndo}
-          onClick={onUndo}
-          className="h-8 shrink-0 rounded-md border px-2 text-xs hover:bg-accent disabled:opacity-50"
-        >
-          Undo
-        </button>
+        <div className="flex shrink-0 gap-2">
+          <button
+            type="button"
+            aria-pressed={pickMode}
+            disabled={busy}
+            onClick={onTogglePickMode}
+            className={`h-8 shrink-0 rounded-md border px-2 text-xs hover:bg-accent disabled:opacity-50 ${
+              pickMode ? "bg-accent ring-2 ring-ring" : ""
+            }`}
+          >
+            Pick from image
+          </button>
+          <button
+            type="button"
+            disabled={!canUndo}
+            onClick={onUndo}
+            className="h-8 shrink-0 rounded-md border px-2 text-xs hover:bg-accent disabled:opacity-50"
+          >
+            Undo
+          </button>
+        </div>
       </div>
       <p className="text-xs text-muted-foreground">
-        Tap an entry, then tap another to merge the first into the second. Undo
-        reverts palette edits back to the freshly-posterized colors.
+        Tap an entry, then tap another to merge the first into the second.
+        &ldquo;Pick from image&rdquo; highlights the palette color under a click
+        on the preview. Undo reverts palette edits back to the
+        freshly-posterized colors.
       </p>
+
+      {selectedEntry && selectedHex ? (
+        <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-2 py-1 text-xs">
+          <span className="font-medium">Picked</span>
+          <span
+            aria-hidden="true"
+            className="inline-block size-3 rounded-full border"
+            style={{ backgroundColor: selectedHex }}
+          />
+          {selectedEntry.catalog ? (
+            <span className="font-medium">{selectedEntry.catalog.name}</span>
+          ) : null}
+          <span className="tabular-nums">{selectedHex}</span>
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-2">
         <h3 className="text-xs font-medium">Neutrals</h3>

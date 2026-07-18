@@ -1,8 +1,50 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type MouseEvent } from "react";
 
 import { downloadFileName, type PixelBuffer } from "@/lib/image-prep-core";
+
+/**
+ * Map a click inside a CSS-scaled, `object-contain` canvas box to an
+ * image-pixel coordinate (R21) — the pure geometry behind "Pick from image".
+ * `object-contain` scales the intrinsic image uniformly by
+ * `min(rectW/imgW, rectH/imgH)` and centers it, letterboxing the excess axis.
+ * A click in that letterbox margin (or on a degenerate zero-size box) returns
+ * `null`; otherwise the drawn content offset is divided back through the scale
+ * and floored to an integer pixel. Kept DOM-free so it is unit-testable
+ * without a real layout (jsdom's getBoundingClientRect returns zeros).
+ */
+export function mapClickToPixel({
+  rectW,
+  rectH,
+  imgW,
+  imgH,
+  offsetX,
+  offsetY,
+}: {
+  rectW: number;
+  rectH: number;
+  imgW: number;
+  imgH: number;
+  offsetX: number;
+  offsetY: number;
+}): { x: number; y: number } | null {
+  if (rectW <= 0 || rectH <= 0 || imgW <= 0 || imgH <= 0) {
+    return null;
+  }
+  const scale = Math.min(rectW / imgW, rectH / imgH);
+  const drawnW = imgW * scale;
+  const drawnH = imgH * scale;
+  const contentX = offsetX - (rectW - drawnW) / 2;
+  const contentY = offsetY - (rectH - drawnH) / 2;
+  if (contentX < 0 || contentX >= drawnW || contentY < 0 || contentY >= drawnH) {
+    return null; // landed in the letterbox margin
+  }
+  return {
+    x: Math.floor(contentX / scale),
+    y: Math.floor(contentY / scale),
+  };
+}
 
 /** Paint a PixelBuffer onto a canvas; no-ops where jsdom has no 2D context. */
 function paint(canvas: HTMLCanvasElement | null, pixels: PixelBuffer) {
@@ -31,13 +73,40 @@ export function BeforeAfterPreview({
   original,
   working,
   fileName,
+  pickMode = false,
+  onPick,
 }: {
   original: PixelBuffer;
   working: PixelBuffer;
   fileName: string;
+  /** "Pick from image" is active — the Preview canvas is an eyedropper (R21). */
+  pickMode?: boolean;
+  /** Report the image-pixel coordinate of a pick on the Preview canvas (R21). */
+  onPick?: (x: number, y: number) => void;
 }) {
   const originalRef = useRef<HTMLCanvasElement>(null);
   const workingRef = useRef<HTMLCanvasElement>(null);
+
+  // DOM glue is thin: read the box + intrinsic size, defer the math to the
+  // pure `mapClickToPixel`, and report the resulting pixel (letterbox = no-op).
+  function handleWorkingClick(event: MouseEvent<HTMLCanvasElement>) {
+    if (!pickMode || !onPick) {
+      return;
+    }
+    const canvas = event.currentTarget;
+    const rect = canvas.getBoundingClientRect();
+    const mapped = mapClickToPixel({
+      rectW: rect.width,
+      rectH: rect.height,
+      imgW: canvas.width,
+      imgH: canvas.height,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    });
+    if (mapped) {
+      onPick(mapped.x, mapped.y);
+    }
+  }
 
   useEffect(() => {
     paint(originalRef.current, original);
@@ -89,7 +158,10 @@ export function BeforeAfterPreview({
           <canvas
             ref={workingRef}
             aria-label="Working image preview"
-            className="mx-auto h-auto max-h-[70vh] w-full max-w-full rounded-md border object-contain"
+            onClick={handleWorkingClick}
+            className={`mx-auto h-auto max-h-[70vh] w-full max-w-full rounded-md border object-contain ${
+              pickMode ? "cursor-crosshair" : ""
+            }`}
           />
         </figure>
       </div>

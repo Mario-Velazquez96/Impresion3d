@@ -751,6 +751,23 @@ export function snapToCatalog(
 
 // ---- rendering ---------------------------------------------------------------
 
+/**
+ * The palette-entry index at pixel (x, y) (R21). x/y are clamped into
+ * `[0, width)` / `[0, height)` so a "Pick from image" click that lands on (or
+ * just past) an edge still resolves to the nearest real pixel instead of
+ * reading past the buffer. Pure — the DOM click→pixel geometry lives in the
+ * component, so this stays unit-testable to 100% branch coverage.
+ */
+export function paletteIndexAt(
+  image: IndexedImage,
+  x: number,
+  y: number,
+): number {
+  const cx = x < 0 ? 0 : x >= image.width ? image.width - 1 : x;
+  const cy = y < 0 ? 0 : y >= image.height ? image.height - 1 : y;
+  return image.indices[cy * image.width + cx];
+}
+
 /** Render an IndexedImage back to opaque RGBA for putImageData (R15). */
 export function indexedToPixels(image: IndexedImage): PixelBuffer {
   const data = new Uint8ClampedArray(image.width * image.height * 4);

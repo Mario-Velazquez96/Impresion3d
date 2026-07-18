@@ -213,6 +213,20 @@ discard the quantized stage) shall reset or discard the history accordingly.
 Undo does **not** revert the Posterize itself, Apply, or file load, and there is
 **no Redo**.
 
+**R21 (Event-driven):** While a quantized result exists, when the user
+activates the **"Pick from image"** toggle and then clicks a point on the
+**Preview (after) canvas**, the system shall resolve that click to an
+image-pixel coordinate — accounting for the canvas's CSS scaling and
+`object-contain` letterboxing, and ignoring clicks that fall in the letterbox
+margin — look up the palette entry that pixel maps to, and **select** (highlight)
+that entry using the same selection the tap-to-merge flow uses, so that tapping
+another entry afterward still merges the picked entry into it. The toggle shall
+reflect its active state (`aria-pressed`, a visible active style, and a
+crosshair cursor on the Preview canvas) and remain on for repeated picking until
+the user toggles it off. This is **client-only**: it adds only a pure
+pixel→entry lookup helper to the core and posts **no** work to the Web Worker,
+changes no schema, dependency, or persistence.
+
 ## Acceptance
 
 - Signed out, `/image-prep` redirects to `/login`. Signed in as an EMPLOYEE

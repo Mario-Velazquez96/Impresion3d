@@ -403,6 +403,39 @@ renders for every authenticated user in both navs (R1):
 - **Targets:** `lib/image-prep-core.ts` **100% branch coverage**; ≥ 80% lines
   on the other changed modules.
 
+## Pick-from-image / eyedropper (R21)
+
+A **client-only** enhancement layered on the existing palette selection — no
+worker round trip, no schema/dependency/persistence change.
+
+- **Core:** one pure helper `paletteIndexAt(image, x, y)` (clamps x/y into
+  `[0, width)`/`[0, height)`, returns `indices[y·width + x]`). This is the ONLY
+  change to `lib/image-prep-core.ts`; existing algorithms, the worker, and the
+  message protocol are untouched. Kept in the core so the pixel→entry lookup
+  stays unit-testable at 100% branch coverage.
+- **Lifted selection:** the palette `selected` index moves from `PalettePanel`
+  up into `ImagePrep` as controlled props (`selected` / `onSelectedChange`),
+  preserving R10 tap-to-merge exactly (tap to select, same tap to deselect,
+  different tap to merge). The old `[image]` selection-reset effect moves up too:
+  `ImagePrep` resets `selected` whenever the quantized `image` reference changes
+  (merge / snap / undo / fresh posterize) or the stage leaves `quantized`.
+- **Pick mode + geometry:** `ImagePrep` owns a `pickMode` flag and a "Pick from
+  image" toggle in `PalettePanel`'s toolbar (`aria-pressed`, active style).
+  `BeforeAfterPreview` gives the Preview canvas `cursor-crosshair` and an
+  `onClick` while pick mode is on. The click→pixel math is a pure, DOM-free
+  `mapClickToPixel({ rectW, rectH, imgW, imgH, offsetX, offsetY })` that inverts
+  the `object-contain` uniform scale + centering (`scale = min(rectW/imgW,
+  rectH/imgH)`), rejects letterbox-margin clicks (returns `null`), and floors to
+  an integer pixel — unit-testable without a real layout. The component glue is
+  thin: read `getBoundingClientRect` + intrinsic `width`/`height`, call the pure
+  function, forward the result.
+- **Wiring:** `ImagePrep.handlePick(x, y)` guards `stage.kind === "quantized"`,
+  computes `paletteIndexAt(stage.image, x, y)`, and sets the lifted `selected`
+  so the swatch highlights via the existing `ring-2 ring-ring` style. Pick mode
+  stays on for repeated picking; the toolbar button toggles it off. A small
+  "Picked" readout (swatch + hex + filament name when snapped) shows the current
+  selection.
+
 ## Open items
 
 - None. AI upscaling, background removal, crop/rotate/brush tools, and any

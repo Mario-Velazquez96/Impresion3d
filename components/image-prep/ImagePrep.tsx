@@ -20,10 +20,11 @@ import {
   type PaletteAction,
   type PixelPayload,
 } from "@/components/image-prep/worker-messages";
-import type {
-  AdjustSettings,
-  IndexedImage,
-  PixelBuffer,
+import {
+  paletteIndexAt,
+  type AdjustSettings,
+  type IndexedImage,
+  type PixelBuffer,
 } from "@/lib/image-prep-core";
 
 /**
@@ -101,8 +102,22 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
   const { request, busy } = useImagePrepWorker();
   const [stage, setStage] = useState<Stage>({ kind: "empty" });
   const [opError, setOpError] = useState<string | null>(null);
+  // Palette selection lives here (lifted from PalettePanel) so "Pick from
+  // image" (R21) can drive it from a canvas click while tap-to-merge (R10)
+  // keeps working. `pickMode` toggles the eyedropper.
+  const [selected, setSelected] = useState<number | null>(null);
+  const [pickMode, setPickMode] = useState(false);
 
   const hasImage = stage.kind !== "empty";
+  const quantizedImage: IndexedImage | null =
+    stage.kind === "quantized" ? stage.image : null;
+
+  // A new palette (merge/snap/undo/fresh quantize) or leaving the quantized
+  // stage invalidates any selection — a stale index would point at the wrong
+  // entry. This preserves PalettePanel's old `[image]` reset after lifting.
+  useEffect(() => {
+    setSelected(null);
+  }, [quantizedImage]);
 
   const info: LoadedImageInfo | null = hasImage
     ? {
@@ -288,6 +303,18 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [canUndo, handleUndo]);
 
+  // "Pick from image" (R21): a click on the Preview canvas resolves to the
+  // palette entry that pixel maps to, then selects that swatch via the same
+  // lifted `selected` state tap-to-merge uses — so picking a color, then
+  // tapping another entry, still merges. Pick mode stays on for repeated
+  // picking; the toolbar button toggles it off.
+  function handlePick(x: number, y: number) {
+    if (stage.kind !== "quantized") {
+      return;
+    }
+    setSelected(paletteIndexAt(stage.image, x, y));
+  }
+
   return (
     <div className="flex flex-col gap-4">
       {busy ? (
@@ -333,6 +360,10 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
               busy={busy}
               canUndo={canUndo}
               onUndo={handleUndo}
+              selected={selected}
+              onSelectedChange={setSelected}
+              pickMode={pickMode}
+              onTogglePickMode={() => setPickMode((on) => !on)}
               onMerge={(from, into) =>
                 void handlePaletteAction({ kind: "merge", from, into })
               }
@@ -358,6 +389,8 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
               original={stage.original}
               working={workingImage}
               fileName={stage.fileName}
+              pickMode={stage.kind === "quantized" && pickMode}
+              onPick={handlePick}
             />
           </div>
         ) : null}

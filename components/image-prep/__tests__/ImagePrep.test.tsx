@@ -627,3 +627,96 @@ describe("pipeline integrity + download (R15, R16, R17)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
+
+describe("pick from image (R21)", () => {
+  const pickButton = () =>
+    screen.getByRole("button", { name: "Pick from image" });
+
+  // jsdom's getBoundingClientRect returns zeros; stub the Preview canvas box so
+  // the pure mapClickToPixel geometry (unit-tested separately) has real inputs.
+  function stubRect(canvas: HTMLElement, width: number, height: number) {
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: width,
+      bottom: height,
+      width,
+      height,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+  }
+
+  it("toggles pick mode, reflecting aria-pressed and a crosshair on the preview", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+
+    const canvas = screen.getByLabelText("Working image preview");
+    expect(pickButton()).toHaveAttribute("aria-pressed", "false");
+    expect(canvas.className).not.toContain("cursor-crosshair");
+
+    fireEvent.click(pickButton());
+    expect(pickButton()).toHaveAttribute("aria-pressed", "true");
+    expect(canvas.className).toContain("cursor-crosshair");
+
+    fireEvent.click(pickButton());
+    expect(pickButton()).toHaveAttribute("aria-pressed", "false");
+    expect(canvas.className).not.toContain("cursor-crosshair");
+  });
+
+  it("selects the palette entry under a click on the Preview canvas", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+
+    const canvas = screen.getByLabelText("Working image preview");
+    stubRect(canvas, 2, 2); // intrinsic 2×2 sample, drawn 1:1
+
+    fireEvent.click(pickButton());
+    // Pixel (1,1) of the 2×2 sample is the red flame → its swatch highlights.
+    fireEvent.click(canvas, { clientX: 1.5, clientY: 1.5 });
+
+    expect(paletteEntry("#c80000")).toHaveAttribute("aria-pressed", "true");
+    // The optional "Picked" readout reflects the picked color.
+    expect(screen.getByText("Picked").closest("div")).toHaveTextContent(
+      "#c80000",
+    );
+  });
+
+  it("a pick then a tap on another entry merges the picked color into it", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+
+    const canvas = screen.getByLabelText("Working image preview");
+    stubRect(canvas, 2, 2);
+
+    fireEvent.click(pickButton());
+    fireEvent.click(canvas, { clientX: 1.5, clientY: 1.5 }); // picks red
+    expect(paletteEntry("#c80000")).toHaveAttribute("aria-pressed", "true");
+
+    // Tap white → red (25%) merges into white (25%) → white 50%, red gone.
+    fireEvent.click(paletteEntry("#ffffff"));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /#c80000/ })).toBeNull(),
+    );
+    expect(paletteEntry("#ffffff")).toHaveTextContent("50.0%");
+  });
+
+  it("ignores a click that lands in the object-contain letterbox", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+
+    const canvas = screen.getByLabelText("Working image preview");
+    // Wide box around a square image → side letterbox: x ∈ [4, 6) is content.
+    stubRect(canvas, 10, 2);
+
+    fireEvent.click(pickButton());
+    fireEvent.click(canvas, { clientX: 0.5, clientY: 1 }); // left margin
+    // Nothing was selected — no "Picked" readout appears.
+    expect(screen.queryByText("Picked")).toBeNull();
+  });
+});

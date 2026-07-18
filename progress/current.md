@@ -108,3 +108,38 @@ worker, `lib/image-prep-core.ts`, schema, dependency, or persistence change.
 Verified green: typecheck · lint · Vitest (**853 tests / 61 files**);
 `lib/image-prep-core.ts` still 100% branch, ImagePrep.tsx 93.9% / PalettePanel
 99.4% lines. `pnpm build` not run per standing instruction.
+
+### Pick-from-image enhancement (2026-07-17)
+Scoped client-only enhancement to the shipped `11_image_prep` feature: a **"Pick
+from image" eyedropper**. Toggle it on, click the Preview (after) canvas, and the
+palette entry that pixel maps to is selected/highlighted — reusing the existing
+palette selection, so tapping another swatch afterward still merges (R21). No
+worker, schema, dependency, or persistence change; the ONLY core change is a
+small pure helper.
+
+- `lib/image-prep-core.ts` — added ONE pure helper `paletteIndexAt(image, x, y)`
+  (clamps x/y into bounds → `indices[y·width + x]`). Nothing else in the core,
+  worker, protocol, or schema touched.
+- `components/image-prep/ImagePrep.tsx` — lifted the palette `selected` index up
+  from `PalettePanel` (controlled props), moved the selection-reset effect up
+  (resets when the quantized image ref changes / stage leaves quantized), added a
+  `pickMode` flag + `handlePick(x, y)` that guards quantized and selects the
+  entry via `paletteIndexAt`. Pick mode stays on for repeated picking.
+- `components/image-prep/BeforeAfterPreview.tsx` — new pure, DOM-free
+  `mapClickToPixel` (inverts object-contain scale + centering, rejects letterbox
+  clicks); Preview canvas gets `cursor-crosshair` + an onClick when pick mode is
+  on. DOM glue stays thin.
+- `components/image-prep/PalettePanel.tsx` — controlled `selected` /
+  `onSelectedChange`; new "Pick from image" toggle (`aria-pressed`, active style)
+  in the toolbar; small "Picked" readout (swatch + hex + filament name).
+- Traceability: new **R21** in `requirements.md`, a design note + tasks (done) in
+  `design.md` / `tasks.md`.
+- Tests: +1 core (`paletteIndexAt` bounds/clamp), +6 unit
+  (`components/image-prep/__tests__/BeforeAfterPreview.test.tsx` — `mapClickToPixel`
+  scale/letterbox/edge/degenerate), +4 component (toggle+crosshair, click selects
+  entry + Picked readout, pick-then-merge, letterbox click ignored).
+
+Verified green: typecheck · lint · Vitest (**864 tests / 62 files**);
+`lib/image-prep-core.ts` still 100% branch; changed components all ≥ 80% lines
+(BeforeAfterPreview 92.4%, ImagePrep 93.7%, PalettePanel 98.6%). `pnpm build` not
+run per standing instruction.

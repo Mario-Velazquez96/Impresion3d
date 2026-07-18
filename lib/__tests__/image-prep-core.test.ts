@@ -37,6 +37,7 @@ import {
   mergeSimilar,
   mergeTiny,
   nearestIndex,
+  paletteIndexAt,
   quantize,
   rgbToHex,
   rgbToHsl,
@@ -619,6 +620,32 @@ describe("snap to catalog (R13, R14, R15)", () => {
   it("returns the input unchanged for an empty catalog", () => {
     const image = makeImage(1, 1, [0], [entry(grey(0), 1)]);
     expect(snapToCatalog(image, [])).toBe(image);
+  });
+
+  it("paletteIndexAt reads the entry index at (x, y), clamping out-of-bounds (R21)", () => {
+    // 3×2 indices, row-major:
+    //   row 0: 0 1 2
+    //   row 1: 2 1 0
+    const image = makeImage(
+      3,
+      2,
+      [0, 1, 2, 2, 1, 0],
+      [entry(grey(0), 2), entry(grey(128), 2), entry({ r: 200, g: 0, b: 0 }, 2)],
+    );
+    // In-bounds (both else branches).
+    expect(paletteIndexAt(image, 0, 0)).toBe(0);
+    expect(paletteIndexAt(image, 1, 0)).toBe(1);
+    expect(paletteIndexAt(image, 2, 1)).toBe(0);
+    // Edge coordinates (last valid column / row).
+    expect(paletteIndexAt(image, 2, 0)).toBe(2);
+    expect(paletteIndexAt(image, 0, 1)).toBe(2);
+    // Out-of-bounds low clamps to 0 on each axis.
+    expect(paletteIndexAt(image, -5, 0)).toBe(0);
+    expect(paletteIndexAt(image, 1, -5)).toBe(1);
+    // Out-of-bounds high clamps to width-1 / height-1.
+    expect(paletteIndexAt(image, 99, 0)).toBe(2); // → (2, 0)
+    expect(paletteIndexAt(image, 0, 99)).toBe(2); // → (0, 1)
+    expect(paletteIndexAt(image, 99, 99)).toBe(0); // → (2, 1)
   });
 
   it("indexedToPixels renders exact palette colors per index, fully opaque", () => {
