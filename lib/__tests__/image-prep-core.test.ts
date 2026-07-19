@@ -84,7 +84,7 @@ describe("constants (pinned by the spec)", () => {
     expect(MAX_WORKING_DIMENSION).toBe(2048);
     expect(MAX_FILE_BYTES).toBe(20 * 1024 * 1024);
     expect(MIN_COLORS).toBe(2);
-    expect(MAX_COLORS).toBe(32);
+    expect(MAX_COLORS).toBe(64);
     expect(DEFAULT_COLORS).toBe(8);
     expect(NEUTRAL_SATURATION_THRESHOLD).toBe(0.12);
     expect(DEFAULT_MERGE_DISTANCE).toBe(40);
@@ -315,12 +315,13 @@ describe("median cut (R7)", () => {
     expect(palette).toEqual([grey(3), grey(245)]);
   });
 
-  it("clamps n to the 2–32 bounds", () => {
+  it("clamps n to the 2–64 bounds", () => {
     const three = buf(3, 1, [grey(0), grey(100), grey(200)]);
     expect(medianCutPalette(three, 1)).toHaveLength(2);
 
-    const many = buf(40, 1, Array.from({ length: 40 }, (_, i) => grey(i * 6)));
-    expect(medianCutPalette(many, 50)).toHaveLength(32);
+    const many = buf(70, 1, Array.from({ length: 70 }, (_, i) => grey(i * 3)));
+    expect(medianCutPalette(many, 65)).toHaveLength(64); // above the cap clamps
+    expect(medianCutPalette(many, 64)).toHaveLength(64); // the cap itself is valid
   });
 
   it("is deterministic: two runs are deeply equal", () => {

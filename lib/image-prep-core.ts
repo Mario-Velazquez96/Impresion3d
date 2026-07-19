@@ -40,7 +40,7 @@ export type PaletteEntry = {
   catalog: { id: string; name: string; hex: string } | null;
 };
 
-/** The quantized working state. `indices` fits Uint8Array because N ≤ 32. */
+/** The quantized working state. `indices` fits Uint8Array because N ≤ 64 (Uint8Array holds up to 255). */
 export type IndexedImage = {
   width: number;
   height: number;
@@ -64,7 +64,7 @@ export const MAX_WORKING_DIMENSION = 2048;
 export const MAX_FILE_BYTES = 20 * 1024 * 1024;
 /** Posterize color-count slider bounds and default (R7). */
 export const MIN_COLORS = 2;
-export const MAX_COLORS = 32;
+export const MAX_COLORS = 64;
 export const DEFAULT_COLORS = 8;
 /** HSL saturation below this is a "neutral" in the palette view (R9). */
 export const NEUTRAL_SATURATION_THRESHOLD = 0.12;
@@ -354,7 +354,7 @@ function longestAxisRange(box: CutItem[]): {
  * the box with the largest longest-axis range (tie → lowest box index) at the
  * pixel-count-weighted median of that axis, until `n` boxes exist or no box
  * is splittable; each palette entry is the count-weighted mean of its box.
- * `n` clamps to 2–32. An image with k ≤ n distinct colors returns exactly
+ * `n` clamps to 2–64. An image with k ≤ n distinct colors returns exactly
  * those k colors. An empty buffer returns an empty palette.
  */
 export function medianCutPalette(src: PixelBuffer, n: number): Rgb[] {
@@ -544,7 +544,7 @@ export function mapToPalette(
 
 /**
  * Posterize (R7, R8): derive the ≤ n color median-cut palette (n clamped to
- * 2–32), then map — flat or Floyd–Steinberg-dithered. Deterministic.
+ * 2–64), then map — flat or Floyd–Steinberg-dithered. Deterministic.
  */
 export function quantize(
   src: PixelBuffer,

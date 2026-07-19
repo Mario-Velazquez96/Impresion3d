@@ -48,7 +48,7 @@ worker is a thin, stateless dispatcher over the pure core.
   2. **Adjust** (optional, applied on demand via an Apply button): brightness,
      contrast, saturation, gamma sliders (identity defaults) and an auto-levels
      checkbox, plus a 256-bin **luminance histogram** of the adjusted image.
-  3. **Posterize**: reduce to N colors (slider **2–32, default 8**) via
+  3. **Posterize**: reduce to N colors (slider **2–64, default 8**) via
      median-cut quantization in the worker; optional **Floyd–Steinberg
      dithering** (checkbox, **off by default** — flat bands print better in
      HueForge).
@@ -127,7 +127,7 @@ shall leave the image pixel-identical (identity). Moving a slider alone shall
 (Rec. 601 luma) of the current adjusted image, recomputed after every Apply.
 
 **R7 (Event-driven):** When the user activates **Posterize** with a color count
-N chosen on a slider (**2–32, default 8**), the system shall quantize the
+N chosen on a slider (**2–64, default 8**), the system shall quantize the
 adjusted image to **at most N distinct colors** via **median-cut** running in
 the **Web Worker**, deterministically (the same input and N always yield the
 same palette and output).
@@ -266,7 +266,7 @@ selected, and **Clear**, which empties the selection — such that:
   Apply and reflects the adjustment (R5, R6).
 - Posterize at the default **8** yields at most 8 distinct colors; running it
   twice on the same input yields identical output; the slider refuses values
-  outside 2–32 (R7). With dithering off, areas are flat; toggling it on
+  outside 2–64 (R7). With dithering off, areas are flat; toggling it on
   produces the Floyd–Steinberg pattern (R8).
 - The palette lists every entry with swatch + hex + coverage %, percentages
   summing to ~100%, greys under the neutral column (light→dark) and the rest

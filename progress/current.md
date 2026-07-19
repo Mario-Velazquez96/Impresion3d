@@ -161,3 +161,5 @@ in `progress/impl_11_image_prep.md`; specs amended in
 Verified green: typecheck · lint · Vitest (**878 tests / 62 files**);
 `lib/image-prep-core.ts` still 100% branch; ImagePrep 93.9% / PalettePanel
 99.6% lines. `pnpm build` not run per standing instruction.
+
+- 2026-07-18: Posterize color cap raised 32 → 64 (`MAX_COLORS` in `lib/image-prep-core.ts`; slider/clamp/specs/tests updated in step; no structural change — `indices` stays Uint8Array). Green: typecheck · lint · Vitest (878 tests / 62 files); core still 100% branch.

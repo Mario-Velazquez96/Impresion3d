@@ -337,11 +337,11 @@ describe("adjust stage (R5, R6, R18)", () => {
 });
 
 describe("posterize stage (R7, R8, R9)", () => {
-  it("has slider bounds 2–32 defaulting to 8 and dithering off by default", async () => {
+  it("has slider bounds 2–64 defaulting to 8 and dithering off by default", async () => {
     render(<ImagePrep catalogColors={CATALOG} />);
     const slider = screen.getByLabelText("Colors");
     expect(slider).toHaveAttribute("min", "2");
-    expect(slider).toHaveAttribute("max", "32");
+    expect(slider).toHaveAttribute("max", "64");
     expect(slider).toHaveValue("8");
     expect(
       screen.getByLabelText(/dithering \(floyd–steinberg\)/i),

@@ -102,7 +102,7 @@ export type Rgb = { r: number; g: number; b: number };
 /** ImageData-compatible, but a plain object: constructible in Node tests. */
 export type PixelBuffer = { width: number; height: number; data: Uint8ClampedArray }; // RGBA
 
-/** The quantized working state. indices fits Uint8Array because N ≤ 32. */
+/** The quantized working state. indices fits Uint8Array because N ≤ 64 (Uint8Array holds up to 255). */
 export type PaletteEntry = {
   color: Rgb;
   count: number;                                    // pixels mapped to this entry
@@ -115,7 +115,7 @@ export type AdjustSettings = { brightness: number; contrast: number; gamma: numb
 // ---- constants (exported so tests + UI pin the same values) -----------
 export const MAX_WORKING_DIMENSION = 2048;          // R4
 export const MAX_FILE_BYTES = 20 * 1024 * 1024;     // R3
-export const MIN_COLORS = 2, MAX_COLORS = 32, DEFAULT_COLORS = 8;      // R7
+export const MIN_COLORS = 2, MAX_COLORS = 64, DEFAULT_COLORS = 8;      // R7 (cap raised 32 → 64, 2026-07-18; no structural change — indices stay Uint8Array)
 export const NEUTRAL_SATURATION_THRESHOLD = 0.12;   // R9
 export const DEFAULT_MERGE_DISTANCE = 40;           // R11 (redmean units, slider 0–150)
 export const DEFAULT_TINY_COVERAGE_PERCENT = 2;     // R12 (slider 0–20)
@@ -136,7 +136,7 @@ export function luminanceHistogram(src: PixelBuffer): Uint32Array;          // 2
 export function autoLevelsRange(hist: Uint32Array, clip?: number): { low: number; high: number }; // percentile bounds; flat image → identity range
 
 // ---- stage 3: posterize (R7, R8) ----------------------------------------
-export function medianCutPalette(src: PixelBuffer, n: number): Rgb[];       // clamps n to 2–32; ≤ n entries; deterministic
+export function medianCutPalette(src: PixelBuffer, n: number): Rgb[];       // clamps n to 2–64; ≤ n entries; deterministic
 export function nearestIndex(c: Rgb, palette: Rgb[]): number;               // redmean argmin, lowest index wins ties
 export function quantize(src: PixelBuffer, n: number, dither: boolean): IndexedImage; // maps (flat) or FS-dithers; counts filled
 
@@ -166,7 +166,7 @@ Design notes:
 
 - **All functions are pure** — new buffers/arrays out, inputs never mutated.
   Merges return a fresh `IndexedImage` (indices remapped through an old→new
-  lookup table, O(pixels) with a ≤ 32-entry map), so React state stays
+  lookup table, O(pixels) with a ≤ 64-entry map), so React state stays
   immutable and the worker can transfer results without aliasing.
 - **`IndexedImage` is the pivot type.** Quantize produces it; every cleanup and
   snap operation is `IndexedImage → IndexedImage`; `indexedToPixels` renders
@@ -308,7 +308,7 @@ type Stage =
 - **`HistogramChart`** — renders the 256-bin `Uint32Array` as an inline SVG bar
   chart (no canvas → trivially assertable in jsdom), with an accessible label
   (R6).
-- **`PosterizePanel`** — N slider (`min=2 max=32`, default 8, value shown),
+- **`PosterizePanel`** — N slider (`min=2 max=64`, default 8, value shown),
   dither checkbox (default off), **Posterize** button (disabled until an image
   is loaded, and while `busy`) (R7, R8).
 - **`PalettePanel`** — two labelled groups (Neutrals / Colors) from
@@ -376,7 +376,7 @@ renders for every authenticated user in both navs (R1):
   saturation known-value cases + 0–255 clamping; histogram bin counts;
   auto-levels range + flat-image edge; `fitWithin`; median-cut — an image with
   k ≤ N distinct colors returns exactly those k, two clear clusters split
-  correctly, n clamps to 2–32, determinism (two runs strictly equal);
+  correctly, n clamps to 2–64, determinism (two runs strictly equal);
   `nearestIndex` tie-break; flat quantize vs a hand-computed Floyd–Steinberg
   example; coverage sums; classify thresholds + both sort orders;
   `mergeEntries` (remap, counts, from===into no-op); `mergeSimilar` iteration

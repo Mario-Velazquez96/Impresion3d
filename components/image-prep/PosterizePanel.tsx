@@ -9,7 +9,7 @@ import {
 } from "@/lib/image-prep-core";
 
 /**
- * Posterize controls (R7, R8): the color-count slider (2–32, default 8), the
+ * Posterize controls (R7, R8): the color-count slider (2–64, default 8), the
  * dithering checkbox (OFF by default — flat bands print better in HueForge),
  * and the Posterize button (disabled with no image and while busy, R18).
  * Slider movement is local state only; the worker runs on button press.
