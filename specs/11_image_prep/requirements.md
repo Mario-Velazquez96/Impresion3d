@@ -54,9 +54,11 @@ worker is a thin, stateless dispatcher over the pure core.
      HueForge).
   4. **Palette cleanup** on the quantized result: entries with hex + coverage
      %, split into **neutrals** (low saturation, sorted light→dark) and
-     **colors** (sorted by hue); **tap two** entries to merge; **merge
-     similar** (pairwise color-distance threshold); **merge tiny** (absorb
-     entries below a coverage % into the nearest remaining color).
+     **colors** (sorted by hue); **tap entries to build a multi-selection**,
+     then merge the selection to its count-weighted **average** color or
+     **into one chosen survivor** (R22); **merge similar** (pairwise
+     color-distance threshold); **merge tiny** (absorb entries below a
+     coverage % into the nearest remaining color).
   5. **Snap to filaments**: remap every palette entry to the nearest hex in
      the `Color` catalog, labelling entries with the filament's name.
   6. **Before/after preview** (original vs current working image) and
@@ -142,12 +144,12 @@ to 100% within rounding) — split into **neutrals** (HSL saturation below the
 neutral threshold, sorted by lightness, light→dark) and **colors** (sorted by
 hue ascending).
 
-**R10 (Event-driven):** When the user taps a palette entry it becomes the
-selected source (visually marked); when the user then taps a **different**
-entry, the system shall merge the source into that target — remapping all
-source pixels to the target color, combining their coverage, and removing the
-source entry; tapping the already-selected entry shall deselect it without
-merging.
+**R10 (Event-driven):** When the user taps a palette entry, the system shall
+**toggle** that entry in or out of a **multi-selection** (any number of
+entries, across both the Neutrals and Colors groups), visually marking each
+selected entry (`aria-pressed` + highlight ring); tapping alone shall never
+merge. *(Amended 2026-07-18: the original instant tap-two merge is
+**superseded** by the multi-select merges of R22.)*
 
 **R11 (Event-driven):** When the user activates **"Merge similar"** with a
 color-distance threshold, the system shall repeatedly merge the closest pair of
@@ -201,8 +203,8 @@ a bounded, client-only **undo history of palette states** (each the
 `{ image, preview }` pair a palette operation produces) capped at a sane depth
 (oldest states dropped beyond the cap), such that: a fresh Posterize
 establishes the baseline as the sole history entry with **Undo disabled**; each
-successful palette-cleanup action (tap-two **merge**, **merge-similar**,
-**merge-tiny**, **snap-to-filaments**) pushes the prior state so that when the
+successful palette-cleanup action (the multi-select **merges** of R22,
+**merge-similar**, **merge-tiny**, **snap-to-filaments**) pushes the prior state so that when the
 user activates **Undo** the system reverts to it — repeatable back to the
 fresh-posterize baseline, at which point Undo is disabled again — **without
 re-posting work to the Web Worker or recomputing anything** (a pure client-state
@@ -218,14 +220,37 @@ activates the **"Pick from image"** toggle and then clicks a point on the
 **Preview (after) canvas**, the system shall resolve that click to an
 image-pixel coordinate — accounting for the canvas's CSS scaling and
 `object-contain` letterboxing, and ignoring clicks that fall in the letterbox
-margin — look up the palette entry that pixel maps to, and **select** (highlight)
-that entry using the same selection the tap-to-merge flow uses, so that tapping
-another entry afterward still merges the picked entry into it. The toggle shall
+margin — look up the palette entry that pixel maps to, and **toggle** that entry in or
+out of the same multi-selection the swatch taps use (R10, R22) — picking a
+pixel whose entry is already selected deselects it. The toggle shall
 reflect its active state (`aria-pressed`, a visible active style, and a
 crosshair cursor on the Preview canvas) and remain on for repeated picking until
 the user toggles it off. This is **client-only**: it adds only a pure
 pixel→entry lookup helper to the core and posts **no** work to the Web Worker,
 changes no schema, dependency, or persistence.
+
+**R22 (State-driven):** While one or more palette entries are selected, the
+system shall show a **selection action bar** in the Palette section with the
+selected count ("N selected") and three controls — **Merge to average** and
+**Merge into one of them…**, each enabled only when **≥ 2** entries are
+selected, and **Clear**, which empties the selection — such that:
+
+- When the user activates **Merge to average**, the system shall merge all
+  selected entries into **one** entry, positioned at the **lowest** selected
+  index, whose color is the **count-weighted average RGB** (rounded per
+  channel) of the selected entries — their pixels remapped to it, their
+  counts summed, and any snapped **catalog link cleared** on the result (it
+  is a new color; the user can re-snap).
+- When the user activates **Merge into one of them…**, the system shall list
+  the currently selected entries (swatch + hex, plus the filament name when
+  snapped); choosing one shall merge all **other** selected entries into it,
+  the chosen entry surviving **unchanged** (keeping its color and any catalog
+  link).
+- Both merges shall run **through the Web Worker** like every other palette
+  action and shall therefore push onto the R20 undo history (Undo restores
+  the pre-merge palette), and the selection shall reset whenever the palette
+  changes (merge results, merge-similar, merge-tiny, snap, undo, fresh
+  posterize).
 
 ## Acceptance
 
@@ -246,10 +271,16 @@ changes no schema, dependency, or persistence.
 - The palette lists every entry with swatch + hex + coverage %, percentages
   summing to ~100%, greys under the neutral column (light→dark) and the rest
   sorted by hue (R9).
-- Tapping entry A then entry B removes A, grows B's coverage by A's, and
-  recolors A's pixels to B; tapping A twice merely deselects (R10). "Merge
-  similar" collapses near-duplicate entries below the threshold; "Merge tiny"
-  absorbs sub-threshold slivers into their nearest color (R11, R12).
+- Tapping entries A and B marks both selected ("2 selected" in the action
+  bar) with no merge; tapping A again deselects it (R10). With A and B
+  selected, "Merge to average" replaces them with one count-weighted average
+  color (catalog link cleared), and "Merge into one of them…" → B removes A,
+  grows B's coverage by A's, and recolors A's pixels to B, B keeping its
+  color and filament label; with only one entry selected both merge buttons
+  are disabled; Clear empties the selection; Undo restores the pre-merge
+  palette (R20, R22). "Merge similar" collapses near-duplicate entries below
+  the threshold; "Merge tiny" absorbs sub-threshold slivers into their
+  nearest color (R11, R12).
 - With a seeded catalog, "Snap to filaments" relabels every entry with a
   catalog color's name + hex, and two entries nearest to the same filament
   collapse into one; with an empty catalog the button is disabled with a

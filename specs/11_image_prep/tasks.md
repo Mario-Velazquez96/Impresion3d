@@ -25,6 +25,8 @@
 - [x] **Palette undo (R20)** — add a bounded, client-only undo history of palette states to the `quantized` stage in `components/image-prep/ImagePrep.tsx`: a `history: { image; preview }[]` field seeded by Posterize with the baseline result, pushed by each palette-cleanup action (capped at `MAX_PALETTE_HISTORY` = 20, oldest dropped), and a `handleUndo` that pops it as PURE client state (no worker re-post, no recompute) restoring the prior `image`/`preview`; `canUndo = quantized && !busy && history.length > 1`; a `Ctrl/Cmd+Z` listener that reuses `handleUndo` and only `preventDefault`s when `canUndo`. Add `canUndo`/`onUndo` props + a secondary-styled **Undo** button to `components/image-prep/PalettePanel.tsx`. No worker, `lib/image-prep-core.ts`, schema, dependency, or persistence change (R20)
 - [x] **Pick-from-image / eyedropper (R21)** — client-only. Add ONE pure helper `paletteIndexAt(image, x, y)` to `lib/image-prep-core.ts` (clamp x/y into bounds → `indices[y·width + x]`); no other core/worker/protocol/schema/dependency change. Lift the palette `selected` index from `PalettePanel` into `ImagePrep` as controlled props (`selected`/`onSelectedChange`), preserving R10 tap-to-merge, and move the `[image]` selection-reset up (reset when the quantized image ref changes / stage leaves quantized). Add a `pickMode` flag + a "Pick from image" toggle in `PalettePanel` (`aria-pressed`, active style); pass `pickMode`/`onPick` to `BeforeAfterPreview`, which gives the Preview canvas `cursor-crosshair` and an onClick that maps via the pure `mapClickToPixel` (inverts object-contain scale/centering, rejects letterbox clicks). `ImagePrep.handlePick` guards quantized, computes `paletteIndexAt`, and selects the entry; pick mode stays on for repeated picking. Optional "Picked" readout (R21)
 - [x] Confirm the no-persistence contract holds: `prisma/schema.prisma` and `prisma/migrations/` untouched, no `actions/` file, no `app/api/` route, no Storage code, no `.env.example` entry, no new `package.json` dependency; the only config diff (if used) is the vitest coverage exclude for the worker entry with its one-line reason (R19)
+- [x] **Multi-select merging (R22, supersedes tap-two R10)** — core: add `mergeManyEntries(image, from[], into)` (dedupe `from`, ignore `into` inside it, remap + sum counts, survivor keeps color AND catalog, no-op when nothing left) and `mergeEntriesToAverage(image, indices[])` (count-weighted average RGB rounded per channel at the LOWEST selected index, catalog cleared on the survivor, `< 2` distinct indices no-op, unweighted-mean fallback for an all-zero-count selection) to `lib/image-prep-core.ts`; protocol: swap `{ kind: "merge" }` for `{ kind: "mergeMany" }` + `{ kind: "mergeAverage" }` in `PaletteAction` and dispatch them in the worker with identical preview regeneration (R22)
+- [x] **Multi-select merging (R22)** — UI: `ImagePrep` selection becomes `number[]` with a `toggleSelected` handler shared by swatch taps (R10) and the eyedropper (R21 now TOGGLES membership); reset-on-palette-change invariant preserved. `PalettePanel` gets `selected[]`/`onToggleSelected`/`onClearSelection`/`onMergeMany`/`onMergeAverage` props, swatches toggle with the existing `ring-2 ring-ring` + `aria-pressed` marking, and a selection action bar under the swatch groups: "N selected", **Merge to average** + **Merge into one of them…** (disabled below 2 selected; the latter an inline dependency-free chooser listing the selected entries with swatch + hex + filament name), **Clear**. Helper copy rewritten for multi-select; the "Picked" readout folded into the bar's count (R10, R21, R22)
 
 ## Tests
 
@@ -54,6 +56,8 @@ coverage-excluded (logic-free browser shell, exercised by E2E — see design.md)
 - [x] Commit a small fixture `e2e/fixtures/image-prep-sample.png` (a few solid color blocks, ≤ 64×64) for the E2E flow (R7, R9)
 - [x] E2E `e2e/image-prep.spec.ts` (Playwright, **credential-gated** on the employee credentials, skipping when absent — mirrors `e2e/calculator.spec.ts`) — signed out, `/image-prep` redirects to `/login`; signed in as an EMPLOYEE, the **Image prep** nav link is visible and navigates there (R1)
 - [x] E2E — signed in: upload the fixture, Apply defaults, Posterize at 8, see the palette with coverage percentages, snap to filaments (seeded catalog) and see filament names, then Download and assert the suggested filename `image-prep-sample-prepped.png` via the download event — this path exercises the REAL worker and canvas decode (R2, R5, R7, R9, R13, R17, R18, R19)
+- [x] Vitest (core) — multi-select merges: `mergeManyEntries` remaps every source into the survivor, sums counts, drops sources, dedupes `from` and ignores the survivor inside it, no-ops (same reference) when nothing is left, keeps the survivor's color + catalog, and matches `mergeEntries` for a single source; `mergeEntriesToAverage` puts the rounded count-weighted average at the lowest index with the catalog cleared, leaves unselected entries alone, dedupes, no-ops below two distinct indices, and falls back to the unweighted mean for an all-zero-count selection — keeping the core at 100% branch (R22)
+- [x] Component `components/image-prep/__tests__/ImagePrep.test.tsx` (rewrite tap-merge model) — tapping swatches toggles a multi-selection with no worker call; the action bar shows the right count with merges disabled at 1 selected and enabled at ≥ 2; Clear empties the selection; "Merge to average" sends `mergeAverage` and renders the weighted-average result; "Merge into one of them…" lists only the selected entries and keeps the chosen survivor (incl. its filament label after snap) while sending `mergeMany`; pick-from-image TOGGLES membership (same pixel deselects; a pick adds to a tap-selection and the pair merges via the bar); Undo after a multi-merge restores the prior palette; the existing undo suite runs on the new merge flow (R10, R20, R21, R22)
 - [x] `typecheck`, `lint`, and `test` (with coverage) pass; the 100% branch target on `lib/image-prep-core.ts` is met
 
 ## Verification
@@ -67,8 +71,9 @@ coverage-excluded (logic-free browser shell, exercised by E2E — see design.md)
   (R5, R6).
 - Posterize (2–32, default 8) is deterministic median cut in the worker; dither
   is opt-in Floyd–Steinberg (R7, R8).
-- The palette shows coverage %, neutrals vs colors; tap-two, merge-similar,
-  and merge-tiny behave as specified (R9–R12).
+- The palette shows coverage %, neutrals vs colors; multi-select toggling +
+  the action-bar merges (average / into-one-of-them / clear), merge-similar,
+  and merge-tiny behave as specified (R9–R12, R22).
 - Snap maps every entry to the nearest catalog filament, merging duplicates;
   empty catalog disables it gracefully (R13, R14).
 - Before/after stays truthful; upstream changes discard downstream results;
@@ -88,7 +93,8 @@ coverage-excluded (logic-free browser shell, exercised by E2E — see design.md)
   component adjust + E2E; R6 → core histogram + component histogram; R7 →
   core median-cut/quantize + component posterize + E2E; R8 → core dither +
   component dither default; R9 → core stats/classify + component palette +
-  E2E; R10 → core `mergeEntries` + component tap-two; R11 → core
+  E2E; R10 → core `mergeEntries`/`mergeManyEntries` + component
+  toggle-selection tests (amended: multi-select, see R22); R11 → core
   `mergeSimilar` + component; R12 → core `mergeTiny` + component; R13 → core
   snap + component + E2E; R14 → core empty-catalog + component disabled
   state; R15 → core `indexedToPixels` + component pipeline test; R16 →
@@ -96,5 +102,9 @@ coverage-excluded (logic-free browser shell, exercised by E2E — see design.md)
   component download + E2E; R18 → component busy tests + E2E; R19 → the
   no-persistence implementation check + E2E (no writes anywhere); R20 →
   component palette-undo tests (baseline-disabled, restore-previous,
-  walk-back-to-baseline, re-posterize-resets, busy-disabled, Ctrl+Z). Every
-  R1–R20 traces to at least one test task.
+  walk-back-to-baseline, re-posterize-resets, busy-disabled, Ctrl+Z,
+  restore-after-multi-merge); R22 → core `mergeManyEntries` /
+  `mergeEntriesToAverage` tests + component multi-select suite (toggle
+  accumulates, enablement/count, merge-to-average math, survivor-keeps-
+  catalog, Clear, pick toggles membership, undo restores). Every R1–R22
+  traces to at least one test task.

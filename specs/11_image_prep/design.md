@@ -436,6 +436,49 @@ worker round trip, no schema/dependency/persistence change.
   "Picked" readout (swatch + hex + filament name when snapped) shows the current
   selection.
 
+## Multi-select merging (R22, supersedes the tap-two merge)
+
+Replaces the original instant tap-to-merge (old R10) with an explicit
+multi-select model. Still **no** schema/dependency/persistence change and no
+quantize/adjust change — it extends only the pure core, the palette action
+union, and the panel UI.
+
+- **Core** (`lib/image-prep-core.ts`), pure + 100% branch like everything
+  else:
+  - `mergeManyEntries(image, from: number[], into: number)` — remaps every
+    `from` entry into `into`, sums counts, drops the absorbed entries. `from`
+    is deduped and `into` is ignored inside it; nothing left to merge → the
+    input is returned unchanged. The survivor keeps its color **and catalog
+    link**. Generalizes `mergeEntries` (which stays — `mergeSimilar` /
+    `mergeTiny` are built on it).
+  - `mergeEntriesToAverage(image, indices: number[])` — the count-weighted
+    average RGB (rounded per channel) of the deduped selection replaces the
+    entry at the **lowest** selected index; the rest are absorbed into it;
+    the survivor's `catalog` is **cleared** (an averaged color is no longer a
+    snapped filament). `< 2` distinct indices → no-op; an all-zero-count
+    selection falls back to the unweighted mean (no divide-by-zero).
+- **Protocol** (`worker-messages.ts` / `image-prep.worker.ts`): the
+  `PaletteAction` union swaps `{ kind: "merge" }` (now unreachable — the UI
+  no longer sends it; `mergeMany` with one source is its exact equivalent)
+  for `{ kind: "mergeMany"; from: number[]; into: number }` and
+  `{ kind: "mergeAverage"; indices: number[] }`, dispatched to the new core
+  functions with identical preview regeneration. Because they are ordinary
+  palette ops, they participate in the R20 undo history for free.
+- **UI**: the island's lifted selection becomes `selected: number[]` with a
+  `toggleSelected` handler shared by swatch taps (R10) and the eyedropper
+  (R21, which now **toggles** membership). The reset-on-new-palette effect is
+  unchanged (`setSelected([])` keyed on the quantized image ref).
+  `PalettePanel` renders a **selection action bar** under the swatch groups
+  when ≥ 1 entry is selected: "N selected", **Merge to average** +
+  **Merge into one of them…** (both disabled below 2 selected), **Clear**.
+  The target chooser is a dependency-free inline expandable list
+  (`aria-expanded` toggle → one labelled button per selected entry, swatch +
+  hex + filament name), no popover library. The panel guards
+  momentarily-stale indices (`selected.filter(i => i < entries.length)`)
+  because the island's reset effect lands one frame after a palette swap.
+  The old "Picked" readout folded into the action bar's count; the helper
+  copy now describes multi-select.
+
 ## Open items
 
 - None. AI upscaling, background removal, crop/rotate/brush tools, and any

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   DEFAULT_MERGE_DISTANCE,
@@ -12,16 +12,18 @@ import {
 } from "@/lib/image-prep-core";
 
 /**
- * Palette cleanup panel (R9–R14, R21): the quantized palette split into
+ * Palette cleanup panel (R9–R14, R21, R22): the quantized palette split into
  * Neutrals (light→dark) and Colors (by hue), each entry a toggle button with
- * swatch, hex, coverage % — and the filament name once snapped (R13). Tap one
- * entry to select it, tap ANOTHER to merge selected→tapped; tapping the
- * selected entry again deselects without merging (R10). Selection is
- * CONTROLLED by the island so "Pick from image" (R21) can drive it from a
- * canvas click. Below: merge-similar, merge-tiny, and snap-to-filaments
- * controls; snap is disabled with an explanatory note when the catalog is
- * empty (R14). An Undo button reverts the last palette-cleanup action back
- * toward the freshly-posterized palette (R20).
+ * swatch, hex, coverage % — and the filament name once snapped (R13). Tapping
+ * a swatch TOGGLES it in/out of a multi-selection (R22); with entries
+ * selected an action bar appears offering **Merge to average** (all selected
+ * collapse into one count-weighted average color), **Merge into one of
+ * them…** (choose the survivor — it keeps its color and catalog link), and
+ * **Clear**. Selection is CONTROLLED by the island so "Pick from image" (R21)
+ * can toggle it from a canvas click. Below: merge-similar, merge-tiny, and
+ * snap-to-filaments controls; snap is disabled with an explanatory note when
+ * the catalog is empty (R14). An Undo button reverts the last palette-cleanup
+ * action back toward the freshly-posterized palette (R20).
  */
 export function PalettePanel({
   image,
@@ -30,10 +32,12 @@ export function PalettePanel({
   canUndo,
   onUndo,
   selected,
-  onSelectedChange,
+  onToggleSelected,
+  onClearSelection,
   pickMode,
   onTogglePickMode,
-  onMerge,
+  onMergeMany,
+  onMergeAverage,
   onMergeSimilar,
   onMergeTiny,
   onSnap,
@@ -45,15 +49,20 @@ export function PalettePanel({
   canUndo: boolean;
   /** Revert the last palette-cleanup action (merge / snap) (R20). */
   onUndo: () => void;
-  /** The currently selected entry index, lifted to the island (R10, R21). */
-  selected: number | null;
-  /** Set the selected entry (tap-to-select / deselect) (R10, R21). */
-  onSelectedChange: (next: number | null) => void;
+  /** The multi-selected entry indices, lifted to the island (R21, R22). */
+  selected: number[];
+  /** Toggle one entry in/out of the selection (R22). */
+  onToggleSelected: (index: number) => void;
+  /** Empty the selection (the action bar's Clear) (R22). */
+  onClearSelection: () => void;
   /** Whether the eyedropper "Pick from image" mode is active (R21). */
   pickMode: boolean;
   /** Toggle the eyedropper mode on/off (R21). */
   onTogglePickMode: () => void;
-  onMerge: (from: number, into: number) => void;
+  /** Merge every `from` entry into the surviving `into` entry (R22). */
+  onMergeMany: (from: number[], into: number) => void;
+  /** Merge the selected entries into their count-weighted average (R22). */
+  onMergeAverage: (indices: number[]) => void;
   onMergeSimilar: (threshold: number) => void;
   onMergeTiny: (coveragePercentThreshold: number) => void;
   onSnap: () => void;
@@ -62,46 +71,35 @@ export function PalettePanel({
   const [tinyPercent, setTinyPercent] = useState(
     DEFAULT_TINY_COVERAGE_PERCENT,
   );
+  // Whether the "Merge into one of them…" target chooser is open — local UI
+  // state; a new palette closes it (the selection resets in the island).
+  const [choosingTarget, setChoosingTarget] = useState(false);
+
+  useEffect(() => {
+    setChoosingTarget(false);
+  }, [image]);
 
   const { neutrals, colors } = classifyPalette(image);
 
-  function handleTap(index: number) {
-    if (selected === null) {
-      onSelectedChange(index);
-      return;
-    }
-    if (selected === index) {
-      onSelectedChange(null);
-      return;
-    }
-    const from = selected;
-    onSelectedChange(null);
-    onMerge(from, index);
-  }
-
-  const selectedEntry =
-    selected !== null && selected < image.entries.length
-      ? image.entries[selected]
-      : null;
-  const selectedHex = selectedEntry
-    ? selectedEntry.catalog
-      ? selectedEntry.catalog.hex
-      : rgbToHex(selectedEntry.color)
-    : null;
+  // The island resets the selection AFTER the frame that swaps in a new
+  // palette, so guard against momentarily-stale indices before using them.
+  const activeSelection = selected.filter((i) => i < image.entries.length);
+  const canMerge = activeSelection.length >= 2;
 
   const entryButton = (index: number) => {
     const entry = image.entries[index];
     const hex = entry.catalog ? entry.catalog.hex : rgbToHex(entry.color);
     const coverage = coveragePercent(entry, image).toFixed(1);
+    const isSelected = activeSelection.includes(index);
     return (
       <button
         key={index}
         type="button"
-        aria-pressed={selected === index}
+        aria-pressed={isSelected}
         disabled={busy}
-        onClick={() => handleTap(index)}
+        onClick={() => onToggleSelected(index)}
         className={`flex items-center gap-2 rounded-md border px-2 py-1 text-left text-xs hover:bg-accent disabled:opacity-50 ${
-          selected === index ? "ring-2 ring-ring" : ""
+          isSelected ? "ring-2 ring-ring" : ""
         }`}
       >
         <span
@@ -145,26 +143,10 @@ export function PalettePanel({
         </div>
       </div>
       <p className="text-xs text-muted-foreground">
-        Tap an entry, then tap another to merge the first into the second.
-        &ldquo;Pick from image&rdquo; highlights the palette color under a click
-        on the preview. Undo reverts palette edits back to the
-        freshly-posterized colors.
+        Tap entries to select them, then merge below. &ldquo;Pick from
+        image&rdquo; toggles the palette color under a click on the preview.
+        Undo reverts palette edits back to the freshly-posterized colors.
       </p>
-
-      {selectedEntry && selectedHex ? (
-        <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-2 py-1 text-xs">
-          <span className="font-medium">Picked</span>
-          <span
-            aria-hidden="true"
-            className="inline-block size-3 rounded-full border"
-            style={{ backgroundColor: selectedHex }}
-          />
-          {selectedEntry.catalog ? (
-            <span className="font-medium">{selectedEntry.catalog.name}</span>
-          ) : null}
-          <span className="tabular-nums">{selectedHex}</span>
-        </div>
-      ) : null}
 
       <div className="flex flex-col gap-2">
         <h3 className="text-xs font-medium">Neutrals</h3>
@@ -185,6 +167,91 @@ export function PalettePanel({
           <p className="text-xs text-muted-foreground">None</p>
         )}
       </div>
+
+      {activeSelection.length > 0 ? (
+        <div className="flex flex-col gap-2 rounded-md border bg-muted/40 p-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium">
+              {activeSelection.length} selected
+            </span>
+            <button
+              type="button"
+              disabled={busy || !canMerge}
+              onClick={() => onMergeAverage(activeSelection)}
+              className="h-8 rounded-md border px-2 text-xs hover:bg-accent disabled:opacity-50"
+            >
+              Merge to average
+            </button>
+            <button
+              type="button"
+              aria-expanded={choosingTarget && canMerge}
+              disabled={busy || !canMerge}
+              onClick={() => setChoosingTarget((open) => !open)}
+              className="h-8 rounded-md border px-2 text-xs hover:bg-accent disabled:opacity-50"
+            >
+              Merge into one of them…
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setChoosingTarget(false);
+                onClearSelection();
+              }}
+              className="h-8 rounded-md border px-2 text-xs hover:bg-accent disabled:opacity-50"
+            >
+              Clear
+            </button>
+          </div>
+          {choosingTarget && canMerge ? (
+            <div className="flex flex-col gap-1">
+              <p className="text-xs text-muted-foreground">
+                Choose the entry the others merge into — it keeps its color
+                and filament.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {activeSelection.map((index) => {
+                  const entry = image.entries[index];
+                  const hex = entry.catalog
+                    ? entry.catalog.hex
+                    : rgbToHex(entry.color);
+                  const label = entry.catalog
+                    ? `Merge into ${entry.catalog.name} ${hex}`
+                    : `Merge into ${hex}`;
+                  return (
+                    <button
+                      key={index}
+                      type="button"
+                      aria-label={label}
+                      disabled={busy}
+                      onClick={() => {
+                        setChoosingTarget(false);
+                        onMergeMany(
+                          activeSelection.filter((i) => i !== index),
+                          index,
+                        );
+                      }}
+                      className="flex items-center gap-2 rounded-md border px-2 py-1 text-left text-xs hover:bg-accent disabled:opacity-50"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="inline-block size-3 rounded-full border"
+                        style={{ backgroundColor: hex }}
+                      />
+                      {entry.catalog ? (
+                        <span className="font-medium">
+                          {entry.catalog.name}
+                        </span>
+                      ) : null}
+                      <span className="tabular-nums">{hex}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-2 border-t pt-3">
         <div className="flex flex-col gap-1">

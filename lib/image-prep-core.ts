@@ -629,6 +629,113 @@ export function mergeEntries(
 }
 
 /**
+ * Merge MANY entries into one survivor (R22): every entry listed in `from`
+ * is remapped into `into`, its count summed onto it, and the absorbed entries
+ * removed. `from` is deduped and any occurrence of `into` is ignored; with
+ * nothing left to merge the input is returned unchanged. The survivor keeps
+ * its color AND its catalog link. Pure — returns a fresh IndexedImage; like
+ * `mergeEntries`, indices must be valid entry indices (the UI owns validity).
+ */
+export function mergeManyEntries(
+  image: IndexedImage,
+  from: number[],
+  into: number,
+): IndexedImage {
+  const sources = [...new Set(from)].filter((i) => i !== into);
+  if (sources.length === 0) {
+    return image;
+  }
+  const removed = new Set(sources);
+  const entries: PaletteEntry[] = image.entries.map((entry) => ({
+    color: { ...entry.color },
+    count: entry.count,
+    catalog: entry.catalog ? { ...entry.catalog } : null,
+  }));
+  for (const i of sources) {
+    entries[into].count += entries[i].count;
+  }
+  const newEntries = entries.filter((_, i) => !removed.has(i));
+  // old index → new index: survivors keep their relative order (compacted
+  // down); each absorbed index maps to the survivor's compacted slot.
+  const compacted = new Uint8Array(image.entries.length);
+  let next = 0;
+  for (let i = 0; i < image.entries.length; i++) {
+    if (!removed.has(i)) {
+      compacted[i] = next++;
+    }
+  }
+  const indices = new Uint8Array(image.indices.length);
+  for (let p = 0; p < image.indices.length; p++) {
+    const old = image.indices[p];
+    indices[p] = compacted[removed.has(old) ? into : old];
+  }
+  return {
+    width: image.width,
+    height: image.height,
+    indices,
+    entries: newEntries,
+  };
+}
+
+/**
+ * Merge the selected entries into ONE new averaged color (R22): the
+ * count-weighted average RGB (rounded per channel) of the deduped selection
+ * replaces the entry at the LOWEST selected index; the other selected entries
+ * are absorbed into it (pixels remapped, counts summed). The survivor's
+ * `catalog` link is cleared — the averaged color is a new color, not a
+ * snapped filament (the user can re-snap). Fewer than two distinct indices is
+ * a no-op returning the input. A selection whose entries all have zero pixels
+ * falls back to the unweighted mean so the result stays defined.
+ */
+export function mergeEntriesToAverage(
+  image: IndexedImage,
+  indices: number[],
+): IndexedImage {
+  const unique = [...new Set(indices)].sort((a, b) => a - b);
+  if (unique.length < 2) {
+    return image;
+  }
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let total = 0;
+  for (const i of unique) {
+    const entry = image.entries[i];
+    r += entry.color.r * entry.count;
+    g += entry.color.g * entry.count;
+    b += entry.color.b * entry.count;
+    total += entry.count;
+  }
+  if (total === 0) {
+    // Zero pixels across the whole selection (weighted sums are all 0 too):
+    // average the colors unweighted instead of dividing by zero.
+    for (const i of unique) {
+      const entry = image.entries[i];
+      r += entry.color.r;
+      g += entry.color.g;
+      b += entry.color.b;
+    }
+    total = unique.length;
+  }
+  const color: Rgb = {
+    r: Math.round(r / total),
+    g: Math.round(g / total),
+    b: Math.round(b / total),
+  };
+  const survivor = unique[0];
+  // Every absorbed index sits ABOVE the survivor (lowest selected index), so
+  // the survivor's position is stable through the merge. `merged` is a fresh
+  // image (sources are non-empty), so patching its entry stays pure.
+  const merged = mergeManyEntries(image, unique.slice(1), survivor);
+  merged.entries[survivor] = {
+    color,
+    count: merged.entries[survivor].count,
+    catalog: null,
+  };
+  return merged;
+}
+
+/**
  * Repeatedly merge the closest pair of entries whose redmean distance is
  * strictly below `threshold` — the smaller-count entry is absorbed into the
  * larger (equal counts → the higher index into the lower, a defined

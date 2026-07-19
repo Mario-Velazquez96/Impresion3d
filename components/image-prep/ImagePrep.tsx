@@ -102,10 +102,11 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
   const { request, busy } = useImagePrepWorker();
   const [stage, setStage] = useState<Stage>({ kind: "empty" });
   const [opError, setOpError] = useState<string | null>(null);
-  // Palette selection lives here (lifted from PalettePanel) so "Pick from
-  // image" (R21) can drive it from a canvas click while tap-to-merge (R10)
-  // keeps working. `pickMode` toggles the eyedropper.
-  const [selected, setSelected] = useState<number | null>(null);
+  // The palette MULTI-selection (R22) lives here (lifted from PalettePanel)
+  // so "Pick from image" (R21) can toggle membership from a canvas click.
+  // Tapping a swatch toggles it in/out; the merges act on the whole set.
+  // `pickMode` toggles the eyedropper.
+  const [selected, setSelected] = useState<number[]>([]);
   const [pickMode, setPickMode] = useState(false);
 
   const hasImage = stage.kind !== "empty";
@@ -113,11 +114,21 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
     stage.kind === "quantized" ? stage.image : null;
 
   // A new palette (merge/snap/undo/fresh quantize) or leaving the quantized
-  // stage invalidates any selection — a stale index would point at the wrong
-  // entry. This preserves PalettePanel's old `[image]` reset after lifting.
+  // stage invalidates any selection — stale indices would point at the wrong
+  // entries. This preserves PalettePanel's old `[image]` reset after lifting.
   useEffect(() => {
-    setSelected(null);
+    setSelected([]);
   }, [quantizedImage]);
+
+  // Toggle one entry in/out of the multi-selection (R22) — used by both the
+  // swatch taps and the eyedropper (R21).
+  const toggleSelected = useCallback((index: number) => {
+    setSelected((prev) =>
+      prev.includes(index)
+        ? prev.filter((i) => i !== index)
+        : [...prev, index],
+    );
+  }, []);
 
   const info: LoadedImageInfo | null = hasImage
     ? {
@@ -304,15 +315,15 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
   }, [canUndo, handleUndo]);
 
   // "Pick from image" (R21): a click on the Preview canvas resolves to the
-  // palette entry that pixel maps to, then selects that swatch via the same
-  // lifted `selected` state tap-to-merge uses — so picking a color, then
-  // tapping another entry, still merges. Pick mode stays on for repeated
-  // picking; the toolbar button toggles it off.
+  // palette entry that pixel maps to, then TOGGLES it in the multi-selection
+  // (R22) — picking a pixel whose entry is already selected deselects it.
+  // Pick mode stays on for repeated picking; the toolbar button toggles it
+  // off.
   function handlePick(x: number, y: number) {
     if (stage.kind !== "quantized") {
       return;
     }
-    setSelected(paletteIndexAt(stage.image, x, y));
+    toggleSelected(paletteIndexAt(stage.image, x, y));
   }
 
   return (
@@ -361,11 +372,15 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
               canUndo={canUndo}
               onUndo={handleUndo}
               selected={selected}
-              onSelectedChange={setSelected}
+              onToggleSelected={toggleSelected}
+              onClearSelection={() => setSelected([])}
               pickMode={pickMode}
               onTogglePickMode={() => setPickMode((on) => !on)}
-              onMerge={(from, into) =>
-                void handlePaletteAction({ kind: "merge", from, into })
+              onMergeMany={(from, into) =>
+                void handlePaletteAction({ kind: "mergeMany", from, into })
+              }
+              onMergeAverage={(indices) =>
+                void handlePaletteAction({ kind: "mergeAverage", indices })
               }
               onMergeSimilar={(threshold) =>
                 void handlePaletteAction({ kind: "mergeSimilar", threshold })

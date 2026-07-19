@@ -29,7 +29,8 @@ export type PixelPayload = {
 };
 
 export type PaletteAction =
-  | { kind: "merge"; from: number; into: number }
+  | { kind: "mergeMany"; from: number[]; into: number }
+  | { kind: "mergeAverage"; indices: number[] }
   | { kind: "mergeSimilar"; threshold: number }
   | { kind: "mergeTiny"; coveragePercent: number }
   | { kind: "snap"; catalog: { id: string; name: string; hex: string }[] };

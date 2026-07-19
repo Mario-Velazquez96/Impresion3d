@@ -143,3 +143,21 @@ Verified green: typecheck · lint · Vitest (**864 tests / 62 files**);
 `lib/image-prep-core.ts` still 100% branch; changed components all ≥ 80% lines
 (BeforeAfterPreview 92.4%, ImagePrep 93.7%, PalettePanel 98.6%). `pnpm build` not
 run per standing instruction.
+
+### Multi-select merge enhancement (2026-07-18)
+Replaced `11_image_prep`'s instant tap-to-merge with **multi-select merging**
+(new R22; R10 rewritten as toggle-only, R21 picks now toggle membership). Tap
+swatches (or pick pixels) to build a selection; an action bar under the palette
+groups offers **Merge to average** (count-weighted average color at the lowest
+selected index, catalog cleared), **Merge into one of them…** (inline
+dependency-free chooser; the chosen survivor keeps its color + filament link),
+and **Clear**. Core gains pure `mergeManyEntries` + `mergeEntriesToAverage`;
+the worker `PaletteAction` union swaps `merge` for `mergeMany`/`mergeAverage`,
+so both merges ride the R20 undo history; selection still resets on every
+palette change. No schema/dependency/persistence change. Details + traceability
+in `progress/impl_11_image_prep.md`; specs amended in
+`specs/11_image_prep/{requirements,design,tasks}.md`.
+
+Verified green: typecheck · lint · Vitest (**878 tests / 62 files**);
+`lib/image-prep-core.ts` still 100% branch; ImagePrep 93.9% / PalettePanel
+99.6% lines. `pnpm build` not run per standing instruction.

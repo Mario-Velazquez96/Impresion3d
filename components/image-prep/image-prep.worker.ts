@@ -11,7 +11,8 @@ import {
   applyAdjustments,
   indexedToPixels,
   luminanceHistogram,
-  mergeEntries,
+  mergeEntriesToAverage,
+  mergeManyEntries,
   mergeSimilar,
   mergeTiny,
   quantize,
@@ -48,8 +49,10 @@ function applyPaletteAction(
   action: PaletteAction,
 ): IndexedImage {
   switch (action.kind) {
-    case "merge":
-      return mergeEntries(image, action.from, action.into);
+    case "mergeMany":
+      return mergeManyEntries(image, action.from, action.into);
+    case "mergeAverage":
+      return mergeEntriesToAverage(image, action.indices);
     case "mergeSimilar":
       return mergeSimilar(image, action.threshold);
     case "mergeTiny":

@@ -29,7 +29,8 @@ import {
   applyAdjustments,
   indexedToPixels,
   luminanceHistogram,
-  mergeEntries,
+  mergeEntriesToAverage,
+  mergeManyEntries,
   mergeSimilar,
   mergeTiny,
   quantize,
@@ -129,13 +130,15 @@ async function fakeRequest(
   const image = deserializeIndexedImage(body.image);
   const action = body.action;
   const next =
-    action.kind === "merge"
-      ? mergeEntries(image, action.from, action.into)
-      : action.kind === "mergeSimilar"
-        ? mergeSimilar(image, action.threshold)
-        : action.kind === "mergeTiny"
-          ? mergeTiny(image, action.coveragePercent)
-          : snapToCatalog(image, action.catalog);
+    action.kind === "mergeMany"
+      ? mergeManyEntries(image, action.from, action.into)
+      : action.kind === "mergeAverage"
+        ? mergeEntriesToAverage(image, action.indices)
+        : action.kind === "mergeSimilar"
+          ? mergeSimilar(image, action.threshold)
+          : action.kind === "mergeTiny"
+            ? mergeTiny(image, action.coveragePercent)
+            : snapToCatalog(image, action.catalog);
   return pipelineResult(next);
 }
 
@@ -193,10 +196,35 @@ async function loadSample(name = "sample.png") {
 async function posterize() {
   fireEvent.click(screen.getByRole("button", { name: "Posterize" }));
   await screen.findByRole("heading", { name: "Palette" });
+  // Let the island's selection-reset effect (keyed on the new palette) settle
+  // before tests start toggling swatches, so it cannot wipe a fresh selection.
+  await act(async () => {});
 }
 
 const paletteEntry = (hex: string) =>
   screen.getByRole("button", { name: new RegExp(hex) });
+
+/**
+ * Select the given source swatches plus the target, then merge them via the
+ * action bar's "Merge into one of them…" chooser (R22). The survivor keeps
+ * its color/catalog, so downstream assertions match the old tap-two merges.
+ */
+async function mergeSelectionInto(sourceHexes: string[], targetHex: string) {
+  // Settle any pending selection-reset effect from a palette that just landed.
+  await act(async () => {});
+  for (const hex of [...sourceHexes, targetHex]) {
+    fireEvent.click(paletteEntry(hex));
+  }
+  await screen.findByText(`${sourceHexes.length + 1} selected`);
+  fireEvent.click(
+    screen.getByRole("button", { name: "Merge into one of them…" }),
+  );
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: new RegExp(`^Merge into (.+ )?${targetHex}$`),
+    }),
+  );
+}
 
 describe("upload path (R2, R3, R4)", () => {
   it("shows dimensions and formatted size for a valid PNG", async () => {
@@ -350,33 +378,137 @@ describe("posterize stage (R7, R8, R9)", () => {
   });
 });
 
-describe("palette interactions (R10–R14)", () => {
-  it("tap A then B merges A into B; tapping A twice deselects without merging", async () => {
+describe("palette multi-select + merges (R10, R22, and R11–R14)", () => {
+  it("tapping swatches toggles a multi-selection without issuing any merge", async () => {
     render(<ImagePrep catalogColors={CATALOG} />);
     await loadSample();
     await posterize();
     const callsAfterQuantize = mocks.requestSpy.mock.calls.length;
 
-    // Tap the same entry twice: select → deselect, no request.
     fireEvent.click(paletteEntry("#c80000"));
     expect(paletteEntry("#c80000")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+    // A second tap on ANOTHER entry accumulates instead of merging.
+    fireEvent.click(paletteEntry("#000000"));
+    expect(paletteEntry("#000000")).toHaveAttribute("aria-pressed", "true");
+    expect(paletteEntry("#c80000")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+
+    // Re-tapping a selected entry toggles it back out.
     fireEvent.click(paletteEntry("#c80000"));
     expect(paletteEntry("#c80000")).toHaveAttribute("aria-pressed", "false");
-    expect(mocks.requestSpy.mock.calls.length).toBe(callsAfterQuantize);
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
 
-    // Tap black, then white: black merges into white (50% + 25% = 75%).
+    expect(mocks.requestSpy.mock.calls.length).toBe(callsAfterQuantize);
+  });
+
+  it("enables the merge actions only at ≥2 selected; Clear empties the selection", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+    const callsAfterQuantize = mocks.requestSpy.mock.calls.length;
+
+    fireEvent.click(paletteEntry("#000000"));
+    expect(
+      screen.getByRole("button", { name: "Merge to average" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Merge into one of them…" }),
+    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Clear" })).toBeEnabled();
+
+    fireEvent.click(paletteEntry("#ffffff"));
+    expect(
+      screen.getByRole("button", { name: "Merge to average" }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Merge into one of them…" }),
+    ).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(screen.queryByText(/\d+ selected/)).toBeNull();
+    expect(paletteEntry("#000000")).toHaveAttribute("aria-pressed", "false");
+    expect(paletteEntry("#ffffff")).toHaveAttribute("aria-pressed", "false");
+    expect(mocks.requestSpy.mock.calls.length).toBe(callsAfterQuantize);
+  });
+
+  it("Merge to average collapses the selection into one count-weighted color", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+
     fireEvent.click(paletteEntry("#000000"));
     fireEvent.click(paletteEntry("#ffffff"));
+    fireEvent.click(screen.getByRole("button", { name: "Merge to average" }));
+
+    // (0·2 + 255·1) / 3 = 85 → #555555, covering the combined 75%.
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: /#000000/ })).toBeNull(),
     );
-    expect(paletteEntry("#ffffff")).toHaveTextContent("75.0%");
+    expect(screen.queryByRole("button", { name: /#ffffff/ })).toBeNull();
+    expect(paletteEntry("#555555")).toHaveTextContent("75.0%");
+    expect(paletteEntry("#c80000")).toHaveTextContent("25.0%");
     expect(mocks.requestSpy).toHaveBeenLastCalledWith(
       expect.objectContaining({
         op: "palette",
-        action: expect.objectContaining({ kind: "merge" }),
+        action: expect.objectContaining({ kind: "mergeAverage" }),
       }),
     );
+    // The new palette resets the selection (the reset effect keys on it).
+    await waitFor(() =>
+      expect(screen.queryByText(/\d+ selected/)).toBeNull(),
+    );
+  });
+
+  it("Merge into one of them… lists only the selected entries and keeps the chosen survivor", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+
+    fireEvent.click(paletteEntry("#c80000"));
+    fireEvent.click(paletteEntry("#ffffff"));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Merge into one of them…" }),
+    );
+    // The chooser offers exactly the selected entries.
+    expect(
+      screen.getByRole("button", { name: "Merge into #c80000" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Merge into #ffffff" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Merge into.*#000000/ }),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Merge into #ffffff" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /#c80000/ })).toBeNull(),
+    );
+    // The survivor keeps its own color; coverage combines (25% + 25%).
+    expect(paletteEntry("#ffffff")).toHaveTextContent("50.0%");
+    expect(mocks.requestSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        op: "palette",
+        action: expect.objectContaining({ kind: "mergeMany" }),
+      }),
+    );
+  });
+
+  it("a snapped survivor keeps its filament label through a targeted merge", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+    fireEvent.click(screen.getByRole("button", { name: "Snap to filaments" }));
+    await screen.findByText("Rojo");
+
+    await mergeSelectionInto(["#ffffff"], "#ff0000");
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /#ffffff/ })).toBeNull(),
+    );
+    expect(paletteEntry("#ff0000")).toHaveTextContent("Rojo");
+    expect(paletteEntry("#ff0000")).toHaveTextContent("50.0%");
   });
 
   it("Merge similar / Merge tiny send their (default) thresholds", async () => {
@@ -455,8 +587,7 @@ describe("palette undo (R20)", () => {
     const callsAfterQuantize = mocks.requestSpy.mock.calls.length;
 
     // Merge black into white → white 75%, black gone.
-    fireEvent.click(paletteEntry("#000000"));
-    fireEvent.click(paletteEntry("#ffffff"));
+    await mergeSelectionInto(["#000000"], "#ffffff");
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: /#000000/ })).toBeNull(),
     );
@@ -485,14 +616,12 @@ describe("palette undo (R20)", () => {
     await posterize();
 
     // Action 1: black into white (75% white).
-    fireEvent.click(paletteEntry("#000000"));
-    fireEvent.click(paletteEntry("#ffffff"));
+    await mergeSelectionInto(["#000000"], "#ffffff");
     await waitFor(() =>
       expect(paletteEntry("#ffffff")).toHaveTextContent("75.0%"),
     );
     // Action 2: red into white (100% white).
-    fireEvent.click(paletteEntry("#c80000"));
-    fireEvent.click(paletteEntry("#ffffff"));
+    await mergeSelectionInto(["#c80000"], "#ffffff");
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: /#c80000/ })).toBeNull(),
     );
@@ -524,13 +653,33 @@ describe("palette undo (R20)", () => {
     expect(mocks.requestSpy.mock.calls.length).toBe(callsBeforeUndo);
   });
 
-  it("re-running Posterize resets the history so Undo is disabled again", async () => {
+  it("restores the prior palette after a multi-merge to average", async () => {
     render(<ImagePrep catalogColors={CATALOG} />);
     await loadSample();
     await posterize();
 
     fireEvent.click(paletteEntry("#000000"));
     fireEvent.click(paletteEntry("#ffffff"));
+    fireEvent.click(screen.getByRole("button", { name: "Merge to average" }));
+    await waitFor(() =>
+      expect(paletteEntry("#555555")).toHaveTextContent("75.0%"),
+    );
+
+    fireEvent.click(undoButton());
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /#555555/ })).toBeNull(),
+    );
+    expect(paletteEntry("#000000")).toHaveTextContent("50.0%");
+    expect(paletteEntry("#ffffff")).toHaveTextContent("25.0%");
+    expect(undoButton()).toBeDisabled(); // back at baseline
+  });
+
+  it("re-running Posterize resets the history so Undo is disabled again", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+
+    await mergeSelectionInto(["#000000"], "#ffffff");
     await waitFor(() => expect(undoButton()).toBeEnabled());
 
     // A fresh Posterize establishes a new baseline (same source → same palette).
@@ -547,8 +696,7 @@ describe("palette undo (R20)", () => {
     const view = render(<ImagePrep catalogColors={CATALOG} />);
     await loadSample();
     await posterize();
-    fireEvent.click(paletteEntry("#000000"));
-    fireEvent.click(paletteEntry("#ffffff"));
+    await mergeSelectionInto(["#000000"], "#ffffff");
     await waitFor(() => expect(undoButton()).toBeEnabled());
 
     mocks.busyRef.value = true;
@@ -561,8 +709,7 @@ describe("palette undo (R20)", () => {
     await loadSample();
     await posterize();
 
-    fireEvent.click(paletteEntry("#000000"));
-    fireEvent.click(paletteEntry("#ffffff"));
+    await mergeSelectionInto(["#000000"], "#ffffff");
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: /#000000/ })).toBeNull(),
     );
@@ -666,7 +813,7 @@ describe("pick from image (R21)", () => {
     expect(canvas.className).not.toContain("cursor-crosshair");
   });
 
-  it("selects the palette entry under a click on the Preview canvas", async () => {
+  it("toggles the palette entry under a click on the Preview canvas (R22)", async () => {
     render(<ImagePrep catalogColors={CATALOG} />);
     await loadSample();
     await posterize();
@@ -675,17 +822,18 @@ describe("pick from image (R21)", () => {
     stubRect(canvas, 2, 2); // intrinsic 2×2 sample, drawn 1:1
 
     fireEvent.click(pickButton());
-    // Pixel (1,1) of the 2×2 sample is the red flame → its swatch highlights.
+    // Pixel (1,1) of the 2×2 sample is the red flame → its swatch toggles in.
     fireEvent.click(canvas, { clientX: 1.5, clientY: 1.5 });
-
     expect(paletteEntry("#c80000")).toHaveAttribute("aria-pressed", "true");
-    // The optional "Picked" readout reflects the picked color.
-    expect(screen.getByText("Picked").closest("div")).toHaveTextContent(
-      "#c80000",
-    );
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+    // Picking the same pixel again toggles the entry back OUT.
+    fireEvent.click(canvas, { clientX: 1.5, clientY: 1.5 });
+    expect(paletteEntry("#c80000")).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByText(/\d+ selected/)).toBeNull();
   });
 
-  it("a pick then a tap on another entry merges the picked color into it", async () => {
+  it("a pick adds to an existing selection, ready for a multi-merge", async () => {
     render(<ImagePrep catalogColors={CATALOG} />);
     await loadSample();
     await posterize();
@@ -693,12 +841,19 @@ describe("pick from image (R21)", () => {
     const canvas = screen.getByLabelText("Working image preview");
     stubRect(canvas, 2, 2);
 
+    fireEvent.click(paletteEntry("#ffffff")); // tap-selected first
     fireEvent.click(pickButton());
     fireEvent.click(canvas, { clientX: 1.5, clientY: 1.5 }); // picks red
+
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+    expect(paletteEntry("#ffffff")).toHaveAttribute("aria-pressed", "true");
     expect(paletteEntry("#c80000")).toHaveAttribute("aria-pressed", "true");
 
-    // Tap white → red (25%) merges into white (25%) → white 50%, red gone.
-    fireEvent.click(paletteEntry("#ffffff"));
+    // The picked pair merges through the action bar like any selection.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Merge into one of them…" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Merge into #ffffff" }));
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: /#c80000/ })).toBeNull(),
     );
@@ -716,7 +871,7 @@ describe("pick from image (R21)", () => {
 
     fireEvent.click(pickButton());
     fireEvent.click(canvas, { clientX: 0.5, clientY: 1 }); // left margin
-    // Nothing was selected — no "Picked" readout appears.
-    expect(screen.queryByText("Picked")).toBeNull();
+    // Nothing was selected — the selection action bar does not appear.
+    expect(screen.queryByText(/\d+ selected/)).toBeNull();
   });
 });

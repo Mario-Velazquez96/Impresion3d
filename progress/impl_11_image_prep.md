@@ -186,3 +186,67 @@ step at a time back to the fresh-posterize palette. No Redo. No worker,
   the history so Undo is disabled again", "disables Undo while the worker is
   busy even with history to revert", "reverts the last palette action via
   Ctrl+Z".
+
+## Enhancement: multi-select palette merging (R22, supersedes tap-two R10) — 2026-07-18
+
+Replaced the instant tap-to-merge with an explicit **multi-select** model:
+tapping a swatch (or picking a pixel, R21) toggles it in/out of a selection;
+an action bar merges the whole selection. No schema, dependency, env var, or
+persistence change; quantize/adjust logic untouched.
+
+### What changed
+
+- `lib/image-prep-core.ts` — two new pure functions, core still **100%
+  branch**: `mergeManyEntries(image, from[], into)` (dedupes `from`, ignores
+  `into` inside it, remaps + sums counts, survivor keeps color AND catalog,
+  no-op same-reference when nothing left) and
+  `mergeEntriesToAverage(image, indices[])` (rounded count-weighted average
+  RGB at the LOWEST selected index, survivor's `catalog` cleared, `< 2`
+  distinct indices no-op, unweighted-mean fallback when every selected count
+  is zero).
+- `components/image-prep/worker-messages.ts` +
+  `image-prep.worker.ts` — `PaletteAction` swaps the now-unreachable
+  `{ kind: "merge" }` for `{ kind: "mergeMany" }` and
+  `{ kind: "mergeAverage" }`, dispatched to the new core functions with the
+  same preview regeneration — so both merges ride the R20 undo history for
+  free.
+- `components/image-prep/ImagePrep.tsx` — lifted selection becomes
+  `number[]` with a shared `toggleSelected` (swatch taps + eyedropper, which
+  now TOGGLES membership); the reset-on-new-palette effect (`setSelected([])`
+  keyed on the quantized image ref) preserves the R16/R20 invariants.
+- `components/image-prep/PalettePanel.tsx` — swatches toggle
+  (`aria-pressed` + `ring-2 ring-ring`); selection action bar under the
+  swatch groups: "N selected", **Merge to average** and **Merge into one of
+  them…** (disabled below 2 selected; the latter a dependency-free inline
+  chooser listing the selected entries with swatch + hex + filament name),
+  **Clear**. Helper copy rewritten; "Picked" readout folded into the bar.
+  Stale-index guard (`selected.filter(i => i < entries.length)`) covers the
+  frame before the island's reset effect lands.
+- `specs/11_image_prep/{requirements,design,tasks}.md` — R10 rewritten
+  (toggle-only, superseded note), R20/R21 amended, new **R22**; design
+  section "Multi-select merging"; tasks (done) + traceability updated.
+
+### Verification
+
+- `corepack pnpm typecheck` — clean; `corepack pnpm lint` — 0 errors.
+- `corepack pnpm test` — **878 tests / 62 files** (was 864 → +14, with the
+  old tap-two tests rewritten). `lib/image-prep-core.ts` **100% branch**;
+  `ImagePrep.tsx` 93.9% / `PalettePanel.tsx` 99.6% lines (≥ 80% target).
+  `pnpm build` not run per standing instruction.
+
+### R22 → tests (traceability)
+
+- Core: `image-prep-core.test.ts > multi-select merges (R22)` — remap/sum/
+  drop, dedupe + survivor-in-`from`, no-op references, survivor keeps
+  color+catalog, single-source parity with `mergeEntries`; average rounding
+  (112.5 → 113) + lowest-index survivor + catalog cleared, unselected
+  entries untouched + dedupe, `< 2` no-ops, zero-count fallback.
+- Component: `ImagePrep.test.tsx > palette multi-select + merges` — toggle
+  accumulates with no worker call; enablement (1 selected → merges disabled,
+  ≥ 2 enabled) + Clear; merge-to-average sends `mergeAverage` and renders
+  the weighted result (#555555 / 75.0%); chooser lists only selected entries,
+  survivor unchanged, sends `mergeMany`; snapped survivor keeps "Rojo".
+- R21 amended: `pick from image` — pick toggles in AND out; a pick adds to a
+  tap-selection and merges via the bar; letterbox click shows no action bar.
+- R20 unchanged plus new "restores the prior palette after a multi-merge to
+  average"; the whole undo suite now runs on the new merge flow.

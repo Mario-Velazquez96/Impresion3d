@@ -34,6 +34,8 @@ import {
   mapToPalette,
   medianCutPalette,
   mergeEntries,
+  mergeEntriesToAverage,
+  mergeManyEntries,
   mergeSimilar,
   mergeTiny,
   nearestIndex,
@@ -592,6 +594,119 @@ describe("merges (R10, R11, R12)", () => {
       entry(grey(255), 8),
     ]);
     expect(mergeTiny(image, 20)).toBe(image);
+  });
+});
+
+describe("multi-select merges (R22)", () => {
+  // 2×3, four entries: black(2), mid-grey(2), light-grey(1), red(1).
+  const base4 = () =>
+    makeImage(2, 3, [0, 1, 2, 3, 0, 1], [
+      entry(grey(0), 2),
+      entry(grey(100), 2),
+      entry(grey(200), 1),
+      entry({ r: 200, g: 0, b: 0 }, 1),
+    ]);
+
+  it("mergeManyEntries remaps every source into the survivor, sums counts, drops sources", () => {
+    const image = base4();
+    const merged = mergeManyEntries(image, [0, 2], 1);
+    expect(merged.entries).toEqual([
+      entry(grey(100), 5),
+      entry({ r: 200, g: 0, b: 0 }, 1),
+    ]);
+    expect([...merged.indices]).toEqual([0, 0, 0, 1, 0, 0]);
+    // input untouched (pure)
+    expect([...image.indices]).toEqual([0, 1, 2, 3, 0, 1]);
+    expect(image.entries).toHaveLength(4);
+  });
+
+  it("mergeManyEntries dedupes `from` and ignores the survivor inside it", () => {
+    const clean = mergeManyEntries(base4(), [0, 2], 1);
+    const noisy = mergeManyEntries(base4(), [0, 0, 1, 2, 2], 1);
+    expect(noisy.entries).toEqual(clean.entries);
+    expect([...noisy.indices]).toEqual([...clean.indices]);
+  });
+
+  it("mergeManyEntries no-ops (same reference) when nothing is left to merge", () => {
+    const image = base4();
+    expect(mergeManyEntries(image, [], 1)).toBe(image);
+    expect(mergeManyEntries(image, [1, 1], 1)).toBe(image);
+  });
+
+  it("mergeManyEntries keeps the survivor's color AND catalog link, sources on both sides", () => {
+    const labeled = makeImage(1, 3, [0, 1, 2], [
+      entry(grey(0), 1),
+      entry(grey(120), 1, { id: "c1", name: "Gris", hex: "#787878" }),
+      entry(grey(255), 1),
+    ]);
+    const merged = mergeManyEntries(labeled, [2, 0], 1);
+    expect(merged.entries).toEqual([
+      entry(grey(120), 3, { id: "c1", name: "Gris", hex: "#787878" }),
+    ]);
+    expect([...merged.indices]).toEqual([0, 0, 0]);
+  });
+
+  it("mergeManyEntries with one source matches mergeEntries", () => {
+    const single = mergeEntries(base4(), 0, 2);
+    const many = mergeManyEntries(base4(), [0], 2);
+    expect(many.entries).toEqual(single.entries);
+    expect([...many.indices]).toEqual([...single.indices]);
+  });
+
+  it("mergeEntriesToAverage puts the rounded count-weighted average at the LOWEST index and clears its catalog", () => {
+    const image = makeImage(2, 2, [0, 1, 2, 1], [
+      entry(grey(0), 1, { id: "c1", name: "Negro", hex: "#000000" }),
+      entry(grey(200), 2),
+      entry(grey(50), 1),
+    ]);
+    // (0·1 + 200·2 + 50·1) / 4 = 112.5 → rounds to 113; catalog cleared.
+    const merged = mergeEntriesToAverage(image, [2, 0, 1]);
+    expect(merged.entries).toEqual([entry(grey(113), 4)]);
+    expect([...merged.indices]).toEqual([0, 0, 0, 0]);
+    // input untouched (pure) — the survivor's old catalog link survives there.
+    expect(image.entries[0].catalog).toEqual({
+      id: "c1",
+      name: "Negro",
+      hex: "#000000",
+    });
+  });
+
+  it("mergeEntriesToAverage leaves unselected entries alone and dedupes indices", () => {
+    const image = makeImage(3, 2, [0, 1, 2, 2, 1, 0], [
+      entry(grey(0), 2),
+      entry({ r: 200, g: 0, b: 0 }, 2),
+      entry(grey(255), 2),
+    ]);
+    // (0·2 + 255·2) / 4 = 127.5 → 128 at index 0; red untouched at index 1.
+    const merged = mergeEntriesToAverage(image, [2, 0]);
+    expect(merged.entries).toEqual([
+      entry(grey(128), 4),
+      entry({ r: 200, g: 0, b: 0 }, 2),
+    ]);
+    expect([...merged.indices]).toEqual([0, 1, 0, 0, 1, 0]);
+
+    const deduped = mergeEntriesToAverage(image, [0, 0, 2, 2]);
+    expect(deduped.entries).toEqual(merged.entries);
+    expect([...deduped.indices]).toEqual([...merged.indices]);
+  });
+
+  it("mergeEntriesToAverage no-ops (same reference) below two distinct indices", () => {
+    const image = base4();
+    expect(mergeEntriesToAverage(image, [])).toBe(image);
+    expect(mergeEntriesToAverage(image, [1])).toBe(image);
+    expect(mergeEntriesToAverage(image, [1, 1])).toBe(image);
+  });
+
+  it("mergeEntriesToAverage falls back to the unweighted mean when all selected counts are zero", () => {
+    const image = makeImage(1, 1, [2], [
+      entry(grey(10), 0),
+      entry(grey(30), 0),
+      entry(grey(200), 1),
+    ]);
+    const merged = mergeEntriesToAverage(image, [0, 1]);
+    // (10 + 30) / 2 = 20 unweighted; the real entry shifts down one slot.
+    expect(merged.entries).toEqual([entry(grey(20), 0), entry(grey(200), 1)]);
+    expect([...merged.indices]).toEqual([1]);
   });
 });
 
