@@ -1,8 +1,13 @@
 "use client";
 
-import { useEffect, useRef, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, type MouseEvent } from "react";
 
-import { downloadFileName, type PixelBuffer } from "@/lib/image-prep-core";
+import {
+  buildHighlightMask,
+  downloadFileName,
+  type IndexedImage,
+  type PixelBuffer,
+} from "@/lib/image-prep-core";
 
 /**
  * Map a click inside a CSS-scaled, `object-contain` canvas box to an
@@ -75,6 +80,7 @@ export function BeforeAfterPreview({
   fileName,
   pickMode = false,
   onPick,
+  highlight = null,
 }: {
   original: PixelBuffer;
   working: PixelBuffer;
@@ -83,9 +89,25 @@ export function BeforeAfterPreview({
   pickMode?: boolean;
   /** Report the image-pixel coordinate of a pick on the Preview canvas (R21). */
   onPick?: (x: number, y: number) => void;
+  /**
+   * Selection highlight (R23): the quantized image + selected entry indices.
+   * Null (or a selection with no valid entries) means no highlight. This is a
+   * RENDER-LAYER effect only — `working` (and thus Download) is untouched.
+   */
+  highlight?: { image: IndexedImage; selected: number[] } | null;
 }) {
   const originalRef = useRef<HTMLCanvasElement>(null);
   const workingRef = useRef<HTMLCanvasElement>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
+
+  // The mask recomputes only when the palette image or the selection changes
+  // (the island memoizes `highlight` on exactly those two). One O(pixels)
+  // pass on the main thread — cheap relative to a worker round trip (R23).
+  const highlightMask = useMemo(
+    () =>
+      highlight ? buildHighlightMask(highlight.image, highlight.selected) : null,
+    [highlight],
+  );
 
   // DOM glue is thin: read the box + intrinsic size, defer the math to the
   // pure `mapClickToPixel`, and report the resulting pixel (letterbox = no-op).
@@ -115,6 +137,18 @@ export function BeforeAfterPreview({
   useEffect(() => {
     paint(workingRef.current, working);
   }, [working]);
+
+  // Paint the highlight veil whenever a mask exists; with no mask the overlay
+  // canvas is unmounted entirely, restoring the plain preview (R23).
+  useEffect(() => {
+    if (highlight && highlightMask) {
+      paint(overlayRef.current, {
+        width: highlight.image.width,
+        height: highlight.image.height,
+        data: highlightMask,
+      });
+    }
+  }, [highlight, highlightMask]);
 
   function handleDownload() {
     const canvas = document.createElement("canvas");
@@ -155,14 +189,29 @@ export function BeforeAfterPreview({
         </figure>
         <figure className="flex min-w-[16rem] flex-1 basis-72 flex-col gap-1">
           <figcaption className="text-xs font-medium">Preview</figcaption>
-          <canvas
-            ref={workingRef}
-            aria-label="Working image preview"
-            onClick={handleWorkingClick}
-            className={`mx-auto h-auto max-h-[70vh] w-full max-w-full rounded-md border object-contain ${
-              pickMode ? "cursor-crosshair" : ""
-            }`}
-          />
+          {/* The wrapper's box IS the Preview canvas's box (canvas is block +
+              w-full), so an inset-0 overlay with the same intrinsic size, a
+              transparent border matching the canvas's 1px border, and the same
+              object-contain fit aligns pixel-for-pixel. pointer-events-none
+              keeps the R21 eyedropper clicks landing on the canvas below. */}
+          <div className="relative">
+            <canvas
+              ref={workingRef}
+              aria-label="Working image preview"
+              onClick={handleWorkingClick}
+              className={`mx-auto h-auto max-h-[70vh] w-full max-w-full rounded-md border object-contain ${
+                pickMode ? "cursor-crosshair" : ""
+              }`}
+            />
+            {highlightMask ? (
+              <canvas
+                ref={overlayRef}
+                aria-hidden="true"
+                data-testid="selection-highlight-overlay"
+                className="pointer-events-none absolute inset-0 h-full w-full rounded-md border border-transparent object-contain"
+              />
+            ) : null}
+          </div>
         </figure>
       </div>
 

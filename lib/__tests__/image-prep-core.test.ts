@@ -12,6 +12,7 @@ import {
   DEFAULT_COLORS,
   DEFAULT_MERGE_DISTANCE,
   DEFAULT_TINY_COVERAGE_PERCENT,
+  HIGHLIGHT_DIM_ALPHA,
   IDENTITY_ADJUSTMENTS,
   MAX_COLORS,
   MAX_FILE_BYTES,
@@ -21,6 +22,7 @@ import {
   applyAdjustments,
   autoLevelsRange,
   buildAdjustmentLut,
+  buildHighlightMask,
   classifyPalette,
   colorDistance,
   coveragePercent,
@@ -773,5 +775,70 @@ describe("snap to catalog (R13, R14, R15)", () => {
     expect([...pixels.data]).toEqual([200, 100, 50, 255, 1, 2, 3, 255]);
     expect(pixels.width).toBe(2);
     expect(pixels.height).toBe(1);
+  });
+});
+
+describe("buildHighlightMask (R23)", () => {
+  // 3×2 indices, row-major:
+  //   row 0: 0 1 2
+  //   row 1: 2 1 0
+  const image = () =>
+    makeImage(
+      3,
+      2,
+      [0, 1, 2, 2, 1, 0],
+      [entry(grey(0), 2), entry(grey(128), 2), entry({ r: 200, g: 0, b: 0 }, 2)],
+    );
+
+  /** Transparent RGBA pixel (selected) vs the black dim veil (the rest). */
+  const CLEAR = [0, 0, 0, 0];
+  const DIM = [0, 0, 0, HIGHLIGHT_DIM_ALPHA];
+
+  it("keeps selected-entry pixels transparent and dims all others", () => {
+    const mask = buildHighlightMask(image(), [1]);
+    expect(mask).not.toBeNull();
+    expect(mask).toHaveLength(3 * 2 * 4);
+    // Entry 1 occupies pixels (1,0) and (1,1); everything else is veiled.
+    expect([...(mask as Uint8ClampedArray)]).toEqual([
+      ...DIM, ...CLEAR, ...DIM,
+      ...DIM, ...CLEAR, ...DIM,
+    ]);
+  });
+
+  it("unions multiple selected entries (any selected entry stays visible)", () => {
+    const mask = buildHighlightMask(image(), [0, 2]);
+    expect([...(mask as Uint8ClampedArray)]).toEqual([
+      ...CLEAR, ...DIM, ...CLEAR,
+      ...CLEAR, ...DIM, ...CLEAR,
+    ]);
+  });
+
+  it("an all-entries selection produces a fully transparent mask", () => {
+    const mask = buildHighlightMask(image(), [0, 1, 2]);
+    expect([...(mask as Uint8ClampedArray)]).toEqual(
+      Array<number>(3 * 2 * 4).fill(0),
+    );
+  });
+
+  it("dedupes and ignores non-integer / out-of-range indices", () => {
+    // [1, 1, 1.5, -1, 99] behaves exactly like [1] — each invalid shape
+    // (fractional, negative, past the palette) filters out independently.
+    expect([
+      ...(buildHighlightMask(image(), [1, 1, 1.5, -1, 99]) as Uint8ClampedArray),
+    ]).toEqual([...(buildHighlightMask(image(), [1]) as Uint8ClampedArray)]);
+  });
+
+  it("returns null when nothing valid is selected (documented contract)", () => {
+    expect(buildHighlightMask(image(), [])).toBeNull();
+    expect(buildHighlightMask(image(), [3, -1, 0.5])).toBeNull(); // all invalid
+  });
+
+  it("is pure — the IndexedImage is never modified", () => {
+    const before = image();
+    const snapshotIndices = [...before.indices];
+    const snapshotEntries = JSON.parse(JSON.stringify(before.entries));
+    buildHighlightMask(before, [0, 2]);
+    expect([...before.indices]).toEqual(snapshotIndices);
+    expect(before.entries).toEqual(snapshotEntries);
   });
 });

@@ -252,6 +252,23 @@ selected, and **Clear**, which empties the selection — such that:
   changes (merge results, merge-similar, merge-tiny, snap, undo, fresh
   posterize).
 
+**R23 (State-driven):** While a quantized result exists **and** one or more
+palette entries are selected (via swatch taps, R10, or the eyedropper, R21),
+the system shall highlight where the selected entries are used on the
+**Preview (after) canvas**: pixels belonging to **any** selected entry (union
+semantics) render at their true color, while every other pixel is dimmed to
+roughly 30% brightness by a semi-opaque dark veil. The highlight is always on
+while the selection is non-empty (no separate toggle) and shall clear the
+moment the selection empties (deselecting the last entry, **Clear**, or any
+palette change that resets the selection per R22). It is a pure
+**render-layer overlay**: the working image and pipeline data are never
+modified, **Download PNG (R17) still exports the unmodified working image**
+while a highlight is showing, and the overlay ignores pointer events so
+pick-from-image clicks (R21) keep reaching the Preview canvas beneath it.
+This is **client-only**: it adds only one pure mask-building helper to the
+core, posts **no** work to the Web Worker, and changes no protocol, schema,
+dependency, or persistence.
+
 ## Acceptance
 
 - Signed out, `/image-prep` redirects to `/login`. Signed in as an EMPLOYEE
@@ -281,6 +298,11 @@ selected, and **Clear**, which empties the selection — such that:
   palette (R20, R22). "Merge similar" collapses near-duplicate entries below
   the threshold; "Merge tiny" absorbs sub-threshold slivers into their
   nearest color (R11, R12).
+- Selecting one or more entries dims everything else on the Preview canvas
+  (selected entries keep their true color); deselecting all, Clear, or a
+  palette change restores the plain preview; Download while highlighted still
+  yields the unmodified working image, and eyedropper clicks still register
+  through the overlay (R23).
 - With a seeded catalog, "Snap to filaments" relabels every entry with a
   catalog color's name + hex, and two entries nearest to the same filament
   collapse into one; with an empty catalog the button is disabled with a

@@ -163,3 +163,38 @@ Verified green: typecheck · lint · Vitest (**878 tests / 62 files**);
 99.6% lines. `pnpm build` not run per standing instruction.
 
 - 2026-07-18: Posterize color cap raised 32 → 64 (`MAX_COLORS` in `lib/image-prep-core.ts`; slider/clamp/specs/tests updated in step; no structural change — `indices` stays Uint8Array). Green: typecheck · lint · Vitest (878 tests / 62 files); core still 100% branch.
+
+### Selection highlight enhancement (2026-07-18)
+Scoped view-only enhancement to the shipped `11_image_prep` feature (new
+**R23**): while the palette multi-selection is non-empty on a quantized result,
+the Preview canvas **dims every pixel not belonging to a selected entry** to
+~30% brightness (selected entries keep their true color; union semantics).
+Always on with a selection, no toggle; clears when the selection empties
+(deselect / Clear / palette-change reset). Pure render-layer effect — pipeline
+data, worker protocol, Download output, schema, dependencies, persistence all
+untouched.
+
+- `lib/image-prep-core.ts` — ONE additive pure helper `buildHighlightMask(image,
+  selected)` + `HIGHLIGHT_DIM_ALPHA` (178): RGBA mask, transparent over selected
+  entries' pixels, semi-opaque black elsewhere; dedupes and ignores
+  non-integer/out-of-range indices; `null` when nothing valid remains.
+- `components/image-prep/BeforeAfterPreview.tsx` — new optional `highlight`
+  prop (`{ image, selected }`); mask built via `useMemo`, painted onto an
+  overlay canvas absolutely stacked over the Preview canvas (same intrinsic
+  dims + object-contain geometry, `pointer-events-none` so R21 eyedropper
+  clicks pass through, `aria-hidden`); overlay unmounts when no mask.
+- `components/image-prep/ImagePrep.tsx` — memoized `highlight` (null unless
+  stage quantized AND selection non-empty) passed to the preview; main-thread
+  compute, no worker op.
+- Traceability: **R23** in `specs/11_image_prep/requirements.md` (+ acceptance
+  bullet), design note in `design.md`, impl + test tasks (done) in `tasks.md`.
+- Tests: +6 core (`buildHighlightMask` transparent/dim/union/all-selected/
+  dedupe-invalid/null-contract + purity), +5 component (overlay mounts with a
+  selection and unmounts on deselect/Clear/fresh-posterize, pointer-events
+  pass-through with same-pixel pick clearing it, Download unaffected while
+  highlighted).
+
+Verified green: typecheck · lint · Vitest (**889 tests / 62 files**);
+`lib/image-prep-core.ts` still 100% branch; BeforeAfterPreview 93.7% /
+ImagePrep 94.1% / PalettePanel 99.6% lines. `pnpm build` not run per standing
+instruction.

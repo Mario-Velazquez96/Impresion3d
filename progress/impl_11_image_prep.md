@@ -250,3 +250,53 @@ persistence change; quantize/adjust logic untouched.
   tap-selection and merges via the bar; letterbox click shows no action bar.
 - R20 unchanged plus new "restores the prior palette after a multi-merge to
   average"; the whole undo suite now runs on the new merge flow.
+
+## Enhancement: selection highlight (R23, 2026-07-18)
+
+View-only overlay showing WHERE the selected palette entries are used: while
+the quantized stage holds a non-empty multi-selection, the Preview canvas dims
+every pixel not belonging to a selected entry to ~30% brightness (union
+semantics; selected entries keep their true color). Always on with a selection
+(no toggle); clears when the selection empties. Pure render layer — pipeline
+data, worker protocol, quantize/merge logic, Download output, schema,
+dependencies, and persistence all untouched.
+
+- `lib/image-prep-core.ts` — the ONLY core change is ONE additive pure helper:
+  `buildHighlightMask(image, selected)` + `HIGHLIGHT_DIM_ALPHA` (178). RGBA
+  mask (`w·h·4`), transparent over any selected entry's pixels, semi-opaque
+  black elsewhere; dedupes and ignores non-integer/out-of-range indices;
+  returns `null` when nothing valid remains (documented contract).
+- `components/image-prep/BeforeAfterPreview.tsx` — optional `highlight` prop
+  (`{ image, selected } | null`); mask built with `useMemo`, painted via the
+  existing jsdom-guarded `paint` onto an overlay canvas absolutely stacked
+  over the Preview canvas (`relative` wrapper; same intrinsic dims, matching
+  object-contain geometry incl. a transparent 1px border; `pointer-events-none`
+  so R21 clicks pass through; `aria-hidden`); unmounts when the mask is null.
+- `components/image-prep/ImagePrep.tsx` — memoized
+  `highlight = { image: quantizedImage, selected }` (null unless quantized AND
+  selection non-empty) passed down; main-thread compute, no worker op.
+- `specs/11_image_prep/{requirements,design,tasks}.md` — new **R23** (EARS) +
+  acceptance bullet; design section "Selection highlight (R23)"; impl + test
+  tasks marked done; traceability extended to R23.
+
+### Verification
+
+- `corepack pnpm typecheck` — clean; `corepack pnpm lint` — 0 errors.
+- `corepack pnpm test` — **889 tests / 62 files** (was 878 → +11).
+  `lib/image-prep-core.ts` **100% branch**; `BeforeAfterPreview.tsx` 93.7% /
+  `ImagePrep.tsx` 94.1% / `PalettePanel.tsx` 99.6% lines (≥ 80% target).
+  `pnpm build` not run per standing instruction.
+
+### R23 → tests (traceability)
+
+- Core: `image-prep-core.test.ts > buildHighlightMask (R23)` — selected
+  pixels transparent vs others dimmed to exactly `HIGHLIGHT_DIM_ALPHA`;
+  union of multiple entries; all-entries → all-transparent; duplicates +
+  non-integer/negative/past-palette indices ignored; empty/all-invalid →
+  `null`; input image unmutated (purity).
+- Component: `ImagePrep.test.tsx > selection highlight (R23)` — overlay
+  mounts at the working image's intrinsic size on selection and unmounts on
+  deselect, Clear, and fresh-posterize reset; `pointer-events-none` asserted
+  with eyedropper clicks still toggling through the visible overlay
+  (same-pixel pick clears it); Download PNG while highlighted still exports
+  `<base>-prepped.png` with no fetch (R17 unaffected).

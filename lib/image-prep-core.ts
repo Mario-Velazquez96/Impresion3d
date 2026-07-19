@@ -875,6 +875,43 @@ export function paletteIndexAt(
   return image.indices[cy * image.width + cx];
 }
 
+/** Alpha of the dimming veil over non-selected pixels (≈ 70% dim) (R23). */
+export const HIGHLIGHT_DIM_ALPHA = 178;
+
+/**
+ * Build the selection-highlight overlay (R23): an RGBA buffer sized
+ * `width·height·4` that is fully transparent over pixels belonging to ANY
+ * `selected` entry (union semantics) and semi-opaque black
+ * (`HIGHLIGHT_DIM_ALPHA`) everywhere else — composited OVER the preview it
+ * dims the rest to ~30% brightness while selected entries show true color.
+ *
+ * CONTRACT: `selected` is deduped and non-integer / out-of-range indices are
+ * ignored; when nothing valid remains the function returns `null` ("no
+ * highlight"), so callers can key overlay visibility on the result. Pure —
+ * a render-layer artifact only; the IndexedImage is never modified.
+ */
+export function buildHighlightMask(
+  image: IndexedImage,
+  selected: number[],
+): Uint8ClampedArray | null {
+  const keep = new Set(
+    selected.filter(
+      (i) => Number.isInteger(i) && i >= 0 && i < image.entries.length,
+    ),
+  );
+  if (keep.size === 0) {
+    return null;
+  }
+  const mask = new Uint8ClampedArray(image.width * image.height * 4);
+  for (let p = 0; p < image.indices.length; p++) {
+    if (!keep.has(image.indices[p])) {
+      // r/g/b stay 0 (black veil); only the alpha byte is set.
+      mask[p * 4 + 3] = HIGHLIGHT_DIM_ALPHA;
+    }
+  }
+  return mask;
+}
+
 /** Render an IndexedImage back to opaque RGBA for putImageData (R15). */
 export function indexedToPixels(image: IndexedImage): PixelBuffer {
   const data = new Uint8ClampedArray(image.width * image.height * 4);

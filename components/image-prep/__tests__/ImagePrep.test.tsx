@@ -875,3 +875,105 @@ describe("pick from image (R21)", () => {
     expect(screen.queryByText(/\d+ selected/)).toBeNull();
   });
 });
+
+describe("selection highlight (R23)", () => {
+  const overlay = () => screen.queryByTestId("selection-highlight-overlay");
+
+  it("shows the dim overlay while a selection exists and clears it on deselect", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+    expect(overlay()).toBeNull(); // no selection yet → plain preview
+
+    fireEvent.click(paletteEntry("#c80000"));
+    const veil = overlay() as HTMLCanvasElement;
+    expect(veil).toBeInTheDocument();
+    // Painted at the working image's intrinsic size (the 2×2 sample) so its
+    // object-contain geometry matches the Preview canvas underneath.
+    expect(veil.width).toBe(2);
+    expect(veil.height).toBe(2);
+
+    // Deselecting the last entry restores the normal preview.
+    fireEvent.click(paletteEntry("#c80000"));
+    expect(overlay()).toBeNull();
+  });
+
+  it("clears the overlay via the action bar's Clear button", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+
+    fireEvent.click(paletteEntry("#000000"));
+    fireEvent.click(paletteEntry("#ffffff"));
+    expect(overlay()).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(overlay()).toBeNull();
+  });
+
+  it("clears when a palette change resets the selection (fresh posterize)", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+    fireEvent.click(paletteEntry("#c80000"));
+    expect(overlay()).toBeInTheDocument();
+
+    await posterize(); // new palette → the selection-reset effect empties it
+    expect(overlay()).toBeNull();
+  });
+
+  it("lets eyedropper clicks pass through (pointer-events-none) while visible", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+
+    const canvas = screen.getByLabelText("Working image preview");
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 2,
+      bottom: 2,
+      width: 2,
+      height: 2,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    fireEvent.click(screen.getByRole("button", { name: "Pick from image" }));
+    fireEvent.click(canvas, { clientX: 1.5, clientY: 1.5 }); // picks red
+    const veil = overlay() as HTMLCanvasElement;
+    expect(veil).toBeInTheDocument();
+    // The overlay must never intercept the R21 clicks landing underneath.
+    expect(veil.className).toContain("pointer-events-none");
+
+    // With the overlay showing, picking the same pixel again still reaches the
+    // Preview canvas and toggles the entry back OUT → overlay clears.
+    fireEvent.click(canvas, { clientX: 1.5, clientY: 1.5 });
+    expect(overlay()).toBeNull();
+  });
+
+  it("Download still exports the unmodified working image while highlighted", async () => {
+    const downloads: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+      function (this: HTMLAnchorElement) {
+        downloads.push(this.download);
+      },
+    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample("photo.jpg");
+    await posterize();
+    fireEvent.click(paletteEntry("#c80000"));
+    expect(overlay()).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Download PNG" }));
+    });
+    // The highlight is render-layer only: the download flow is untouched.
+    expect(downloads).toEqual(["photo-prepped.png"]);
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});

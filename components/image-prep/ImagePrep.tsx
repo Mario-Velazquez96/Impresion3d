@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AdjustPanel } from "@/components/image-prep/AdjustPanel";
 import { BeforeAfterPreview } from "@/components/image-prep/BeforeAfterPreview";
@@ -119,6 +119,19 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
   useEffect(() => {
     setSelected([]);
   }, [quantizedImage]);
+
+  // Selection highlight (R23): while the quantized stage holds a non-empty
+  // selection, the Preview canvas dims every pixel NOT belonging to a selected
+  // entry (union semantics). Memoized on exactly (image, selection) so the
+  // preview rebuilds its mask only when either actually changes — a pure
+  // render-layer effect; the working image / pipeline data never change.
+  const highlight = useMemo(
+    () =>
+      quantizedImage && selected.length > 0
+        ? { image: quantizedImage, selected }
+        : null,
+    [quantizedImage, selected],
+  );
 
   // Toggle one entry in/out of the multi-selection (R22) — used by both the
   // swatch taps and the eyedropper (R21).
@@ -406,6 +419,7 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
               fileName={stage.fileName}
               pickMode={stage.kind === "quantized" && pickMode}
               onPick={handlePick}
+              highlight={highlight}
             />
           </div>
         ) : null}

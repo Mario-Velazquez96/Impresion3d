@@ -479,6 +479,40 @@ union, and the panel UI.
   The old "Picked" readout folded into the action bar's count; the helper
   copy now describes multi-select.
 
+## Selection highlight (R23)
+
+A **view-only** overlay showing where the selected palette entries are used —
+no pipeline-data, worker-protocol, quantize/merge, schema, dependency, or
+persistence change. The dim-the-rest rendering (selected entries at true
+color, everything else veiled) reads better than tinting the selection,
+because the pixels you care about stay truthful.
+
+- **Core** (`lib/image-prep-core.ts`) — the ONLY core change is one additive
+  pure helper: `buildHighlightMask(image, selected)` builds an RGBA buffer
+  (`width·height·4`) that is fully transparent over pixels of any selected
+  entry (union) and semi-opaque black elsewhere (`HIGHLIGHT_DIM_ALPHA` = 178
+  ≈ 70% dim). Contract: `selected` is deduped, non-integer/out-of-range
+  indices are ignored, and `null` is returned when nothing valid remains, so
+  callers key overlay visibility on the result. Single O(pixels) pass —
+  computed on the **main thread** (no worker op; it is far cheaper than a
+  round trip) and unit-tested to keep the core at 100% branch.
+- **Rendering** (`BeforeAfterPreview.tsx`) — the Preview canvas is wrapped in
+  a `relative` div (whose box equals the canvas box: canvas is block +
+  `w-full`); when the mask exists an overlay `<canvas>` mounts absolutely
+  (`inset-0 h-full w-full`) with the same intrinsic width/height, a
+  transparent border matching the base canvas's 1px border, and the same
+  `object-contain` fit, so the veil aligns pixel-for-pixel. It is
+  `pointer-events-none` (R21 eyedropper clicks pass through) and
+  `aria-hidden` (purely decorative). The mask is built in a `useMemo` keyed
+  on the `highlight` prop and painted via the existing jsdom-guarded `paint`
+  helper; with no mask the overlay unmounts entirely.
+- **Wiring** (`ImagePrep.tsx`) — the island memoizes
+  `highlight = { image, selected }` on exactly (quantized image ref,
+  selection), null unless the stage is quantized and the selection is
+  non-empty, and passes it down. Because the selection already resets on
+  every palette change / stage exit (R22), the overlay clears with it for
+  free; Download reads `working` as before, so exports are unaffected.
+
 ## Open items
 
 - None. AI upscaling, background removal, crop/rotate/brush tools, and any
