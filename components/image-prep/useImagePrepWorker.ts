@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
   AdjustResult,
+  FlattenResult,
+  MaskResult,
   PipelineResult,
   WorkerRequestBody,
   WorkerResponse,
@@ -16,26 +18,48 @@ import type {
  * `{ ok: false }` rejects. `busy` is true while any request is in flight —
  * the panels use it to disable conflicting controls.
  *
+ * 12_flatten (R26): `request` takes an optional `{ background: true }` — used
+ * by hover-mask requests — which skips the `inFlight` busy accounting so the
+ * global "Processing…" indicator and control disabling never flicker during
+ * hover. Mutations keep the original behavior exactly.
+ *
  * Component tests mock THIS module with a synchronous core-backed fake; the
  * real worker is logic-free (deserialize → core → serialize), so the fake is
  * behaviorally equivalent (see design.md).
  */
 
-type OpResult = AdjustResult | PipelineResult;
+type OpResult = AdjustResult | PipelineResult | MaskResult | FlattenResult;
 
 type Pending = {
   resolve: (result: OpResult) => void;
   reject: (error: Error) => void;
+  /** Background requests never touched `inFlight`, so don't decrement it. */
+  background: boolean;
 };
 
+export type RequestOptions = { background?: boolean };
+
 export type RequestFn = {
-  (body: Extract<WorkerRequestBody, { op: "adjust" }>): Promise<AdjustResult>;
+  (
+    body: Extract<WorkerRequestBody, { op: "adjust" }>,
+    opts?: RequestOptions,
+  ): Promise<AdjustResult>;
   (
     body: Extract<WorkerRequestBody, { op: "quantize" }>,
+    opts?: RequestOptions,
   ): Promise<PipelineResult>;
   (
     body: Extract<WorkerRequestBody, { op: "palette" }>,
+    opts?: RequestOptions,
   ): Promise<PipelineResult>;
+  (
+    body: Extract<WorkerRequestBody, { op: "mask" }>,
+    opts?: RequestOptions,
+  ): Promise<MaskResult>;
+  (
+    body: Extract<WorkerRequestBody, { op: "flatten" }>,
+    opts?: RequestOptions,
+  ): Promise<FlattenResult>;
 };
 
 export function useImagePrepWorker(): { request: RequestFn; busy: boolean } {
@@ -58,7 +82,9 @@ export function useImagePrepWorker(): { request: RequestFn; busy: boolean } {
         return; // stale/unknown id — e.g. a response after teardown
       }
       pendingRef.current.delete(message.id);
-      setInFlight((n) => n - 1);
+      if (!pending.background) {
+        setInFlight((n) => n - 1);
+      }
       if (message.ok) {
         pending.resolve(message.result);
       } else {
@@ -90,14 +116,21 @@ export function useImagePrepWorker(): { request: RequestFn; busy: boolean } {
   }, []);
 
   const requestImpl = useCallback(
-    (body: WorkerRequestBody): Promise<OpResult> => {
+    (body: WorkerRequestBody, opts?: RequestOptions): Promise<OpResult> => {
       const worker = ensureWorker();
       const id = ++nextIdRef.current;
+      const background = opts?.background === true;
       return new Promise<OpResult>((resolve, reject) => {
-        pendingRef.current.set(id, { resolve, reject });
-        setInFlight((n) => n + 1);
+        pendingRef.current.set(id, { resolve, reject, background });
+        if (!background) {
+          setInFlight((n) => n + 1);
+        }
         const transfer: Transferable[] =
-          body.op === "palette" ? [body.image.indices] : [body.buffer];
+          body.op === "palette"
+            ? [body.image.indices]
+            : body.op === "flatten" && body.action.kind === "fill"
+              ? [body.buffer, body.action.mask]
+              : [body.buffer];
         worker.postMessage({ id, ...body }, transfer);
       });
     },
@@ -106,7 +139,8 @@ export function useImagePrepWorker(): { request: RequestFn; busy: boolean } {
 
   return {
     // Safe narrowing: the protocol pairs each op with exactly one result
-    // shape (adjust → AdjustResult, quantize/palette → PipelineResult).
+    // shape (adjust → AdjustResult, quantize/palette → PipelineResult,
+    // mask → MaskResult, flatten → FlattenResult).
     request: requestImpl as RequestFn,
     busy: inFlight > 0,
   };

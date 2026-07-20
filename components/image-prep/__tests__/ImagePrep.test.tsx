@@ -21,9 +21,16 @@ import {
   deserializeIndexedImage,
   serializeIndexedImage,
   type AdjustResult,
+  type FlattenResult,
+  type MaskResult,
   type PipelineResult,
   type WorkerRequestBody,
 } from "@/components/image-prep/worker-messages";
+import {
+  applyFillToMask,
+  floodMask,
+  maskPixelCount,
+} from "@/lib/flatten-core";
 import {
   MAX_FILE_BYTES,
   applyAdjustments,
@@ -102,7 +109,42 @@ function pipelineResult(image: IndexedImage): PipelineResult {
 /** The synchronous, core-backed stand-in for the real (logic-free) worker. */
 async function fakeRequest(
   body: WorkerRequestBody,
-): Promise<AdjustResult | PipelineResult> {
+): Promise<AdjustResult | PipelineResult | MaskResult | FlattenResult> {
+  if (body.op === "mask") {
+    const src: PixelBuffer = {
+      width: body.width,
+      height: body.height,
+      data: new Uint8ClampedArray(body.buffer),
+    };
+    const mask = floodMask(src, body.seedX, body.seedY, body.tolerance);
+    return { mask: mask.data.buffer as ArrayBuffer, count: maskPixelCount(mask) };
+  }
+  if (body.op === "flatten") {
+    if (body.action.kind !== "fill") {
+      throw new Error("not available yet");
+    }
+    const src: PixelBuffer = {
+      width: body.width,
+      height: body.height,
+      data: new Uint8ClampedArray(body.buffer),
+    };
+    const filled = applyFillToMask(
+      src,
+      {
+        width: body.width,
+        height: body.height,
+        data: new Uint8Array(body.action.mask),
+      },
+      body.action.fill,
+    );
+    return {
+      pixels: {
+        width: filled.width,
+        height: filled.height,
+        buffer: filled.data.buffer as ArrayBuffer,
+      },
+    };
+  }
   if (body.op === "adjust") {
     const src: PixelBuffer = {
       width: body.width,
@@ -974,6 +1016,137 @@ describe("selection highlight (R23)", () => {
     // The highlight is render-layer only: the download flow is untouched.
     expect(downloads).toEqual(["photo-prepped.png"]);
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("flatten stage integration (12_flatten: R1, R2, R3, R22, R27)", () => {
+  const startButton = () =>
+    screen.getByRole("button", { name: "Start flatten" });
+  const exitButton = () => screen.getByRole("button", { name: "Exit flatten" });
+  const workspace = () =>
+    screen.queryByRole("heading", { name: "Flatten workspace" });
+
+  it("Start flatten is disabled with no image and enabled once loaded (R1)", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    expect(startButton()).toBeDisabled();
+    await loadSample();
+    expect(startButton()).toBeEnabled();
+  });
+
+  it("enters from a LOADED stage with counter 0, Undo disabled (R1, R22)", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    fireEvent.click(startButton());
+
+    expect(workspace()).toBeInTheDocument();
+    expect(screen.getByText("0 regions flattened")).toBeInTheDocument();
+    // The flatten Undo (the only Undo on screen — the palette is hidden).
+    expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
+    expect(screen.getByText(/Click add region/)).toBeInTheDocument();
+  });
+
+  it("entering from a QUANTIZED stage hides the palette panel (R1, R2)", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+    expect(screen.getByRole("heading", { name: "Palette" })).toBeInTheDocument();
+
+    fireEvent.click(startButton());
+    expect(workspace()).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Palette" })).toBeNull();
+  });
+
+  it("Start flatten is disabled while the worker is busy (R1)", async () => {
+    const view = render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    mocks.busyRef.value = true;
+    view.rerender(<ImagePrep catalogColors={CATALOG} />);
+    expect(startButton()).toBeDisabled();
+  });
+
+  it("Exit restores the exact prior stage INCLUDING the palette-undo depth (R3)", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+    // Build palette-undo depth: one merge → palette Undo enabled.
+    await mergeSelectionInto(["#000000"], "#ffffff");
+    await waitFor(() =>
+      expect(paletteEntry("#ffffff")).toHaveTextContent("75.0%"),
+    );
+    expect(screen.getByRole("button", { name: "Undo" })).toBeEnabled();
+
+    fireEvent.click(startButton());
+    expect(screen.queryByRole("heading", { name: "Palette" })).toBeNull();
+    // Let the workspace's mount effects settle before swapping stages back.
+    await act(async () => {});
+
+    fireEvent.click(exitButton());
+    // The merged palette AND its undo depth come back exactly as left.
+    expect(paletteEntry("#ffffff")).toHaveTextContent("75.0%");
+    const paletteUndo = screen.getByRole("button", { name: "Undo" });
+    expect(paletteUndo).toBeEnabled();
+    fireEvent.click(paletteUndo);
+    await waitFor(() =>
+      expect(paletteEntry("#000000")).toHaveTextContent("50.0%"),
+    );
+    expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
+  });
+
+  it("Apply discards the flatten stage and its edits (R2)", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    fireEvent.click(startButton());
+    expect(workspace()).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(workspace()).toBeNull());
+    // A fresh adjusted stage took over (its histogram renders).
+    expect(screen.getByTestId("luminance-histogram")).toBeInTheDocument();
+    expect(startButton()).toBeEnabled(); // the card is back in start mode
+  });
+
+  it("Posterize discards the flatten stage (R2)", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    fireEvent.click(startButton());
+    expect(workspace()).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Posterize" }));
+    await screen.findByRole("heading", { name: "Palette" });
+    expect(workspace()).toBeNull();
+  });
+
+  it("loading a new file discards the flatten stage (R2)", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    fireEvent.click(startButton());
+    expect(workspace()).toBeInTheDocument();
+
+    await loadSample("fresh.png");
+    await waitFor(() => expect(workspace()).toBeNull());
+    expect(startButton()).toBeEnabled();
+  });
+
+  it("Download during flatten names <base>-prepped.png with no network (R27)", async () => {
+    const downloads: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+      function (this: HTMLAnchorElement) {
+        downloads.push(this.download);
+      },
+    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample("photo.jpg");
+    fireEvent.click(startButton());
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Download PNG" }));
+    });
+    expect(downloads).toEqual(["photo-prepped.png"]);
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock");
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

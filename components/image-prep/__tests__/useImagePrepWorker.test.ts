@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useImagePrepWorker } from "@/components/image-prep/useImagePrepWorker";
 import type {
   AdjustResult,
+  FlattenResult,
+  MaskResult,
   PipelineResult,
   SerializedIndexedImage,
   WorkerRequest,
@@ -169,6 +171,106 @@ describe("useImagePrepWorker (R18)", () => {
       worker.onerror?.(new Event("error") as ErrorEvent);
     });
     await rejections;
+    expect(result.current.busy).toBe(false);
+  });
+
+  it("background requests never flip busy and resolve like any other (12/R26)", async () => {
+    const { result } = renderHook(() => useImagePrepWorker());
+    const body = {
+      op: "mask" as const,
+      buffer: new ArrayBuffer(16),
+      width: 2,
+      height: 2,
+      seedX: 0,
+      seedY: 0,
+      mode: "flood" as const,
+      tolerance: 24,
+      catchStrays: false,
+    };
+    let promise: Promise<MaskResult> | undefined;
+    act(() => {
+      promise = result.current.request(body, { background: true });
+    });
+    // A hover-mask request is in flight, yet busy stays false.
+    expect(result.current.busy).toBe(false);
+
+    const worker = FakeWorker.instances[0];
+    expect(worker.posted[0].message).toMatchObject({ id: 1, op: "mask" });
+    expect(worker.posted[0].transfer).toEqual([body.buffer]);
+
+    const payload: MaskResult = { mask: new ArrayBuffer(4), count: 2 };
+    await act(async () => {
+      respond(worker, { id: 1, ok: true, op: "mask", result: payload });
+    });
+    await expect(promise).resolves.toBe(payload);
+    expect(result.current.busy).toBe(false);
+  });
+
+  it("busy tracks only foreground work when background requests overlap (12/R26)", async () => {
+    const { result } = renderHook(() => useImagePrepWorker());
+    let background: Promise<MaskResult> | undefined;
+    let foreground: Promise<AdjustResult> | undefined;
+    act(() => {
+      background = result.current.request(
+        {
+          op: "mask",
+          buffer: new ArrayBuffer(16),
+          width: 2,
+          height: 2,
+          seedX: 0,
+          seedY: 0,
+          mode: "flood",
+          tolerance: 24,
+          catchStrays: false,
+        },
+        { background: true },
+      );
+      foreground = result.current.request(adjustBody());
+    });
+    expect(result.current.busy).toBe(true); // the adjust, not the mask
+
+    const worker = FakeWorker.instances[0];
+    await act(async () => {
+      respond(worker, { id: 2, ok: true, op: "adjust", result: adjustPayload() });
+    });
+    // The background mask is STILL pending, but busy already cleared.
+    expect(result.current.busy).toBe(false);
+
+    const payload: MaskResult = { mask: new ArrayBuffer(4), count: 1 };
+    await act(async () => {
+      respond(worker, { id: 1, ok: true, op: "mask", result: payload });
+    });
+    await expect(background).resolves.toBe(payload);
+    await expect(foreground).resolves.toBeDefined();
+    expect(result.current.busy).toBe(false);
+  });
+
+  it("a flatten fill transfers the image buffer AND the mask buffer (12/R16)", async () => {
+    const { result } = renderHook(() => useImagePrepWorker());
+    const buffer = new ArrayBuffer(16);
+    const mask = new ArrayBuffer(4);
+    let promise: Promise<FlattenResult> | undefined;
+    act(() => {
+      promise = result.current.request({
+        op: "flatten",
+        buffer,
+        width: 2,
+        height: 2,
+        action: { kind: "fill", mask, fill: { r: 1, g: 2, b: 3 } },
+      });
+    });
+    expect(result.current.busy).toBe(true); // mutations stay foreground
+
+    const worker = FakeWorker.instances[0];
+    expect(worker.posted[0].transfer).toEqual([buffer, mask]);
+
+    const payload: FlattenResult = {
+      pixels: { width: 2, height: 2, buffer: new ArrayBuffer(16) },
+    };
+    await act(async () => {
+      respond(worker, { id: 1, ok: true, op: "flatten", result: payload });
+    });
+    await expect(promise).resolves.toBe(payload);
     expect(result.current.busy).toBe(false);
   });
 

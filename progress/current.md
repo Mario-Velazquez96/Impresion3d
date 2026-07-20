@@ -1,8 +1,19 @@
 # Current session
 
 ## Feature in progress
-_None — no feature is currently in progress. Pick up the next `pending`
-feature in `feature_list.json` per the SDD flow._
+`12_flatten` — **in_progress**. Spec approved by the human (2026-07-19, all
+three phases); implementer executing `specs/12_flatten/tasks.md` phase by
+phase (A → B → C), reviewer gate + deploy after each phase.
+
+New feature added to `feature_list.json` (2026-07-19): region-by-region
+manual Flatten stage for image-prep (flood/smooth/brush masks with W/S
+resize, multi-region selection, most-common-color fill suggestion with
+runner-ups, flatten selection / recolor every match, Low-Med-High
+auto-flatten presets, despeckle, per-region undo, reset, zoom/pan).
+Client-side only, no persistence; depends on `11_image_prep`. tasks.md
+is phased (A: core select+flatten+undo · B: smooth/catch-strays/recolor
+· C: presets/despeckle/zoom-pan-expand) so it can be approved and
+delivered incrementally.
 
 ## State
 All features `00`–`11` are reviewer-APPROVED and `done` (see `progress/history.md`

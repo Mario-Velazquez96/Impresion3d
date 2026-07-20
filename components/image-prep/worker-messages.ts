@@ -11,6 +11,7 @@ import type {
   AdjustSettings,
   IndexedImage,
   PaletteEntry,
+  Rgb,
 } from "@/lib/image-prep-core";
 
 /** IndexedImage with its indices as a transferable ArrayBuffer. */
@@ -35,6 +36,17 @@ export type PaletteAction =
   | { kind: "mergeTiny"; coveragePercent: number }
   | { kind: "snap"; catalog: { id: string; name: string; hex: string }[] };
 
+/**
+ * Flatten mutations (12_flatten: R16–R19). The full shape ships from Phase A
+ * so the protocol cannot drift between phases; the worker dispatch for
+ * `recolor` and `removeSmall` lands in Phases B and C.
+ */
+export type FlattenAction =
+  /** `mask` is a transferred Uint8Array backing buffer (R16). */
+  | { kind: "fill"; mask: ArrayBuffer; fill: Rgb }
+  | { kind: "recolor"; from: Rgb; to: Rgb }
+  | { kind: "removeSmall"; maxRegionPx: number };
+
 export type WorkerRequestBody =
   | {
       op: "adjust";
@@ -51,7 +63,26 @@ export type WorkerRequestBody =
       colors: number;
       dither: boolean;
     }
-  | { op: "palette"; image: SerializedIndexedImage; action: PaletteAction };
+  | { op: "palette"; image: SerializedIndexedImage; action: PaletteAction }
+  /** Hover-mask build (12_flatten: R4–R6, R9); smooth lands in Phase B. */
+  | {
+      op: "mask";
+      buffer: ArrayBuffer;
+      width: number;
+      height: number;
+      seedX: number;
+      seedY: number;
+      mode: "flood" | "smooth";
+      tolerance: number;
+      catchStrays: boolean;
+    }
+  | {
+      op: "flatten";
+      buffer: ArrayBuffer;
+      width: number;
+      height: number;
+      action: FlattenAction;
+    };
 
 export type WorkerRequest = WorkerRequestBody & { id: number };
 
@@ -68,9 +99,17 @@ export type PipelineResult = {
   preview: PixelPayload;
 };
 
+/** `mask` answers with the Uint8Array backing buffer + its pixel count (R4). */
+export type MaskResult = { mask: ArrayBuffer; count: number };
+
+/** `flatten` mutations answer with the replacement working image (R16). */
+export type FlattenResult = { pixels: PixelPayload };
+
 export type WorkerResponse =
   | { id: number; ok: true; op: "adjust"; result: AdjustResult }
   | { id: number; ok: true; op: "quantize" | "palette"; result: PipelineResult }
+  | { id: number; ok: true; op: "mask"; result: MaskResult }
+  | { id: number; ok: true; op: "flatten"; result: FlattenResult }
   | { id: number; ok: false; error: string };
 
 /** Copying serialize — safe to transfer without detaching the live state. */

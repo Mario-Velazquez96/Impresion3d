@@ -5,6 +5,11 @@
  * coverage-excluded (browser-only worker shell; exercised by E2E — see
  * design.md). Errors never cross the boundary as throws: they come back as
  * `{ ok: false, error }`.
+ *
+ * 12_flatten extends the dispatch with the `mask` and `flatten` ops backed by
+ * `lib/flatten-core.ts` (R4, R5, R16, R26). Actions from later phases
+ * (smooth/catch-strays, recolor, removeSmall) throw a clear error that rides
+ * the same `{ ok: false }` path until their phase lands.
  */
 
 import {
@@ -20,6 +25,12 @@ import {
   type IndexedImage,
   type PixelBuffer,
 } from "@/lib/image-prep-core";
+import {
+  applyFillToMask,
+  floodMask,
+  maskPixelCount,
+  type Mask,
+} from "@/lib/flatten-core";
 import {
   deserializeIndexedImage,
   serializeIndexedImage,
@@ -121,6 +132,54 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
             result: { image: serialized, preview },
           },
           [serialized.indices, preview.buffer],
+        );
+        break;
+      }
+      case "mask": {
+        const src: PixelBuffer = {
+          width: req.width,
+          height: req.height,
+          data: new Uint8ClampedArray(req.buffer),
+        };
+        if (req.mode !== "flood") {
+          throw new Error("Smooth masks are not available yet");
+        }
+        if (req.catchStrays) {
+          throw new Error("Catch stray pixels is not available yet");
+        }
+        const mask = floodMask(src, req.seedX, req.seedY, req.tolerance);
+        const buffer = mask.data.buffer as ArrayBuffer;
+        scope.postMessage(
+          {
+            id: req.id,
+            ok: true,
+            op: "mask",
+            result: { mask: buffer, count: maskPixelCount(mask) },
+          },
+          [buffer],
+        );
+        break;
+      }
+      case "flatten": {
+        const src: PixelBuffer = {
+          width: req.width,
+          height: req.height,
+          data: new Uint8ClampedArray(req.buffer),
+        };
+        if (req.action.kind !== "fill") {
+          throw new Error(
+            `The "${req.action.kind}" flatten action is not available yet`,
+          );
+        }
+        const mask: Mask = {
+          width: req.width,
+          height: req.height,
+          data: new Uint8Array(req.action.mask),
+        };
+        const pixels = toPayload(applyFillToMask(src, mask, req.action.fill));
+        scope.postMessage(
+          { id: req.id, ok: true, op: "flatten", result: { pixels } },
+          [pixels.buffer],
         );
         break;
       }

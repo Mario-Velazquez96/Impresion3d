@@ -9,6 +9,8 @@ import {
   type PixelBuffer,
 } from "@/lib/image-prep-core";
 
+import { paint } from "./canvas-paint";
+
 /**
  * Map a click inside a CSS-scaled, `object-contain` canvas box to an
  * image-pixel coordinate (R21) — the pure geometry behind "Pick from image".
@@ -49,22 +51,6 @@ export function mapClickToPixel({
     x: Math.floor(contentX / scale),
     y: Math.floor(contentY / scale),
   };
-}
-
-/** Paint a PixelBuffer onto a canvas; no-ops where jsdom has no 2D context. */
-function paint(canvas: HTMLCanvasElement | null, pixels: PixelBuffer) {
-  if (!canvas) {
-    return;
-  }
-  canvas.width = pixels.width;
-  canvas.height = pixels.height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    return;
-  }
-  const imageData = ctx.createImageData(pixels.width, pixels.height);
-  imageData.data.set(pixels.data);
-  ctx.putImageData(imageData, 0, 0);
 }
 
 /**
