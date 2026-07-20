@@ -341,6 +341,39 @@ export function FlattenWorkspace({
     }
   }, [busy, suggested, chosenFill, current, request, onMutated]);
 
+  // Auto-flatten presets + Despeckle (R18, R19): run remove-small-regions
+  // image-wide in the worker with the given threshold; the island replaces the
+  // image, pushes the undo history, and leaves the counter unchanged (0 regions
+  // collapsed). The [current] effect then clears the selection.
+  const runCleanup = useCallback(
+    async (maxRegionPx: number) => {
+      if (busy) {
+        return;
+      }
+      try {
+        const result = await request({
+          op: "flatten",
+          buffer: copyPixels(current),
+          width: current.width,
+          height: current.height,
+          action: { kind: "removeSmall", maxRegionPx },
+        });
+        setError(null);
+        onMutated(
+          {
+            width: result.pixels.width,
+            height: result.pixels.height,
+            data: new Uint8ClampedArray(result.pixels.buffer),
+          },
+          0,
+        );
+      } catch {
+        setError("Auto-flatten failed — try again.");
+      }
+    },
+    [busy, current, request, onMutated],
+  );
+
   // Live hex validation (R14): valid values become the chosen fill; invalid
   // non-empty values show the inline error and change nothing.
   const handleHexChange = useCallback((value: string) => {
@@ -467,6 +500,7 @@ export function FlattenWorkspace({
           brushRadius={brushRadius}
           catchStrays={catchStrays}
           onCatchStraysChange={setCatchStrays}
+          onCleanup={(maxRegionPx) => void runCleanup(maxRegionPx)}
           busy={busy}
           canUndo={canUndo}
           onUndo={onUndo}

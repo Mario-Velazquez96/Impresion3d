@@ -11,33 +11,43 @@ import {
   DEFAULT_BRUSH_RADIUS,
   DEFAULT_FLOOD_TOLERANCE,
   DEFAULT_SMOOTH_TOLERANCE,
+  DESPECKLE_MAX_REGION_PX,
   HOVER_OUTLINE_RGBA,
+  IDENTITY_VIEW,
   MAX_BRUSH_RADIUS,
   MAX_FLATTEN_HISTORY,
   MAX_RUNNER_UPS,
   MAX_TOLERANCE,
+  MAX_ZOOM,
   MIN_BRUSH_RADIUS,
   MIN_TOLERANCE,
+  MIN_ZOOM,
+  PRESET_MAX_REGION_PX,
   SELECTION_FILL_ALPHA,
   SELECTION_OUTLINE_RGBA,
   STRAY_MARGIN_PX,
   STRAY_MAX_ISLAND_PX,
   TOLERANCE_STEP,
+  ZOOM_FACTOR,
   addStrayIslands,
   applyFillToMask,
   brushMask,
   buildFlattenOverlay,
+  clampView,
   colorAtPixel,
   floodMask,
   maskContains,
   maskOutline,
   maskPixelCount,
   maskStats,
+  panBy,
   parseHexInput,
   recolorExact,
+  removeSmallRegions,
   smoothMask,
   subtractMask,
   unionMasks,
+  zoomAt,
   type Mask,
 } from "@/lib/flatten-core";
 import { colorDistance, type PixelBuffer, type Rgb } from "@/lib/image-prep-core";
@@ -494,5 +504,189 @@ describe("recolorExact (R17)", () => {
     expect(result.data[3]).toBe(128); // alpha untouched
 
     expect([...image.data]).toEqual(before); // input never mutated
+  });
+});
+
+// ---- Phase C (R18, R19, R23) ------------------------------------------------
+
+describe("Phase C constants (pinned by spec)", () => {
+  it("exports the cleanup thresholds and zoom limits", () => {
+    expect(DESPECKLE_MAX_REGION_PX).toBe(2);
+    expect(PRESET_MAX_REGION_PX).toEqual({ low: 8, medium: 32, high: 128 });
+    expect([MIN_ZOOM, MAX_ZOOM, ZOOM_FACTOR]).toEqual([1, 16, 1.25]);
+    expect(IDENTITY_VIEW).toEqual({ zoom: 1, panX: 0, panY: 0 });
+  });
+});
+
+describe("removeSmallRegions (R18, R19)", () => {
+  it("absorbs a 1-px speck into its (only) border color, leaving big regions", () => {
+    // 3×3 white with a single black pixel at the center: the speck (area 1)
+    // takes its all-white border; the 8-px white ring is untouched.
+    const image = grid(3, 3, [4]);
+    const result = removeSmallRegions(image, DESPECKLE_MAX_REGION_PX);
+    expect(colorAtPixel(result, 1, 1)).toEqual(WHITE);
+    expect(maskPixelCount(floodMask(result, 0, 0, 1))).toBe(9); // now all white
+    // input untouched
+    expect(colorAtPixel(image, 1, 1)).toEqual(BLACK);
+  });
+
+  it("takes the MOST COMMON border color when they differ", () => {
+    // Center black speck with three white borders and one lone red border →
+    // white wins by majority; the red neighbor is itself a speck → also white.
+    const image = buf(3, 3, [
+      WHITE, RED, WHITE,
+      WHITE, BLACK, WHITE,
+      WHITE, WHITE, WHITE,
+    ]);
+    const result = removeSmallRegions(image, 2);
+    expect(maskPixelCount(floodMask(result, 1, 1, 1))).toBe(9); // all white
+  });
+
+  it("breaks border-color ties by first row-major appearance", () => {
+    // Black speck bordered by 2 white (up/left) + 2 red (down/right) — a tie;
+    // white appears first in row-major order, so the speck becomes white.
+    const image = buf(3, 3, [
+      WHITE, WHITE, RED,
+      WHITE, BLACK, RED,
+      RED, RED, RED,
+    ]);
+    const result = removeSmallRegions(image, 2);
+    expect(colorAtPixel(result, 1, 1)).toEqual(WHITE);
+    // The two big regions stay put.
+    expect(colorAtPixel(result, 0, 0)).toEqual(WHITE);
+    expect(colorAtPixel(result, 2, 0)).toEqual(RED);
+  });
+
+  it("samples border colors from the INPUT, independent of processing order", () => {
+    // 3×4: two red specks (indices 4, 6) and a black speck (index 7). Sampling
+    // from the INPUT, the black speck's borders are red(up), red(left), white,
+    // white — a tie won by the earlier red → the speck becomes RED. If borders
+    // were read from the OUTPUT (reds recolored to white first), it would go
+    // white instead — so RED proves input-sampling.
+    const image = buf(3, 4, [
+      WHITE, WHITE, WHITE,
+      WHITE, RED, WHITE,
+      RED, BLACK, WHITE,
+      WHITE, WHITE, WHITE,
+    ]);
+    const result = removeSmallRegions(image, 2);
+    expect(colorAtPixel(result, 1, 2)).toEqual(RED); // the black speck
+    expect(colorAtPixel(result, 1, 1)).toEqual(WHITE); // the upper red speck
+  });
+
+  it("honors the exact threshold: area == max absorbed, area == max+1 kept", () => {
+    // Threshold 2: a 2-px black bar is absorbed; a 3-px black bar is kept.
+    const pair = buf(4, 3, [
+      WHITE, WHITE, WHITE, WHITE,
+      WHITE, BLACK, BLACK, WHITE,
+      WHITE, WHITE, WHITE, WHITE,
+    ]);
+    const absorbed = removeSmallRegions(pair, 2);
+    expect(colorAtPixel(absorbed, 1, 1)).toEqual(WHITE);
+    expect(colorAtPixel(absorbed, 2, 1)).toEqual(WHITE);
+
+    const triple = buf(5, 3, [
+      WHITE, WHITE, WHITE, WHITE, WHITE,
+      WHITE, BLACK, BLACK, BLACK, WHITE,
+      WHITE, WHITE, WHITE, WHITE, WHITE,
+    ]);
+    const kept = removeSmallRegions(triple, 2);
+    expect(colorAtPixel(kept, 2, 1)).toEqual(BLACK); // over the cap → untouched
+  });
+
+  it("leaves a component with no border (whole-image) untouched", () => {
+    const solo = buf(1, 1, [BLACK]);
+    const result = removeSmallRegions(solo, DESPECKLE_MAX_REGION_PX);
+    expect(colorAtPixel(result, 0, 0)).toEqual(BLACK);
+  });
+
+  it("presets remove progressively larger regions (Low < Medium < High)", () => {
+    // A 5×5 white field with a 3×3 (9-px) black block centered: Low (8) keeps
+    // it, Medium (32) and High (128) absorb it.
+    const blacks: number[] = [];
+    for (let y = 1; y <= 3; y++) {
+      for (let x = 1; x <= 3; x++) {
+        blacks.push(y * 5 + x);
+      }
+    }
+    const image = grid(5, 5, blacks);
+    expect(colorAtPixel(removeSmallRegions(image, PRESET_MAX_REGION_PX.low), 2, 2)).toEqual(BLACK);
+    expect(colorAtPixel(removeSmallRegions(image, PRESET_MAX_REGION_PX.medium), 2, 2)).toEqual(WHITE);
+    expect(colorAtPixel(removeSmallRegions(image, PRESET_MAX_REGION_PX.high), 2, 2)).toEqual(WHITE);
+  });
+
+  it("is deterministic: two runs are deeply equal", () => {
+    const image = buf(3, 3, [
+      WHITE, RED, WHITE,
+      WHITE, BLACK, WHITE,
+      WHITE, WHITE, WHITE,
+    ]);
+    expect(removeSmallRegions(image, 2)).toEqual(removeSmallRegions(image, 2));
+  });
+});
+
+describe("view math (R23)", () => {
+  const BOX = 100;
+
+  it("clampView zooms into range and forces the origin at zoom 1", () => {
+    expect(clampView({ zoom: 1, panX: 50, panY: 50 }, BOX, BOX)).toEqual({
+      zoom: 1,
+      panX: 0,
+      panY: 0,
+    });
+    // Below MIN clamps up to 1 (origin forced); above MAX clamps to 16.
+    expect(clampView({ zoom: 0.5, panX: 0, panY: 0 }, BOX, BOX).zoom).toBe(1);
+    expect(clampView({ zoom: 99, panX: 0, panY: 0 }, BOX, BOX).zoom).toBe(16);
+  });
+
+  it("clampView keeps the scaled content covering the viewport", () => {
+    // zoom 2 over a 100-box: pan is confined to [-100, 0] on each axis.
+    expect(clampView({ zoom: 2, panX: 50, panY: 50 }, BOX, BOX)).toEqual({
+      zoom: 2,
+      panX: 0,
+      panY: 0,
+    });
+    expect(clampView({ zoom: 2, panX: -500, panY: -500 }, BOX, BOX)).toEqual({
+      zoom: 2,
+      panX: -100,
+      panY: -100,
+    });
+  });
+
+  it("zoomAt scales toward the cursor, keeping the focal content point fixed", () => {
+    const focal = 50;
+    const zoomed = zoomAt(IDENTITY_VIEW, 1, focal, focal, BOX, BOX);
+    expect(zoomed.zoom).toBe(ZOOM_FACTOR);
+    // Content point under the focal cursor is invariant across the zoom.
+    const contentBefore = (focal - IDENTITY_VIEW.panX) / IDENTITY_VIEW.zoom;
+    const contentAfter = (focal - zoomed.panX) / zoomed.zoom;
+    expect(contentAfter).toBeCloseTo(contentBefore, 6);
+
+    // Zooming back out toward the same point returns to the identity view.
+    const out = zoomAt(zoomed, -1, focal, focal, BOX, BOX);
+    expect(out).toEqual(IDENTITY_VIEW);
+  });
+
+  it("zoomAt clamps at both zoom limits", () => {
+    // At MAX, a further zoom-in is a no-op on the zoom.
+    expect(zoomAt({ zoom: 16, panX: 0, panY: 0 }, 1, 50, 50, BOX, BOX).zoom).toBe(16);
+    // At MIN, a zoom-out stays at the identity view.
+    expect(zoomAt(IDENTITY_VIEW, -1, 50, 50, BOX, BOX)).toEqual(IDENTITY_VIEW);
+  });
+
+  it("panBy moves the view and clamps to the covering bounds", () => {
+    const base = { zoom: 2, panX: 0, panY: 0 };
+    expect(panBy(base, -30, -40, BOX, BOX)).toEqual({
+      zoom: 2,
+      panX: -30,
+      panY: -40,
+    });
+    // Panning past either bound clamps (top/left → 0; bottom/right → -100).
+    expect(panBy(base, 50, 50, BOX, BOX)).toEqual({ zoom: 2, panX: 0, panY: 0 });
+    expect(panBy(base, -300, -300, BOX, BOX)).toEqual({
+      zoom: 2,
+      panX: -100,
+      panY: -100,
+    });
   });
 });

@@ -33,6 +33,7 @@ import {
   floodMask,
   maskPixelCount,
   recolorExact,
+  removeSmallRegions,
   smoothMask,
 } from "@/lib/flatten-core";
 import type { PixelBuffer, Rgb } from "@/lib/image-prep-core";
@@ -118,7 +119,9 @@ async function fakeRequest(
     let out: PixelBuffer;
     if (body.action.kind === "recolor") {
       out = recolorExact(src, body.action.from, body.action.to);
-    } else if (body.action.kind === "fill") {
+    } else if (body.action.kind === "removeSmall") {
+      out = removeSmallRegions(src, body.action.maxRegionPx);
+    } else {
       out = applyFillToMask(
         src,
         {
@@ -128,8 +131,6 @@ async function fakeRequest(
         },
         body.action.fill,
       );
-    } else {
-      throw new Error(`Unexpected flatten action: ${body.action.kind}`);
     }
     return {
       pixels: {
@@ -799,5 +800,135 @@ describe("recolor every match (R17, R20, R22)", () => {
     expect(
       screen.getByRole("button", { name: "Use suggested #000000" }),
     ).toBeInTheDocument();
+  });
+});
+
+// ---- Phase C (R18, R19, R23, R24) -------------------------------------------
+
+const viewport = () => screen.getByTestId("flatten-viewport");
+const transform = () => screen.getByTestId("flatten-transform");
+
+describe("auto-flatten presets + despeckle (R18, R19, R20, R22)", () => {
+  it("sends removeSmall with each preset/Despeckle threshold, undoable, counter unchanged", async () => {
+    render(<ImagePrep catalogColors={[]} />);
+    await enterFlatten();
+
+    const cases: [string, number][] = [
+      ["Low", 8],
+      ["Medium", 32],
+      ["High", 128],
+      ["Despeckle", 2],
+    ];
+    for (const [label, maxRegionPx] of cases) {
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      await act(async () => {}); // flush the worker round trip
+      expect(lastFlattenBody()).toEqual(
+        expect.objectContaining({
+          op: "flatten",
+          action: { kind: "removeSmall", maxRegionPx },
+        }),
+      );
+      // Cleanup collapses no region: the counter never moves off 0.
+      expect(counter(0)).toBeInTheDocument();
+    }
+
+    // The four cleanups pushed undo history; Z walks back and re-disables Undo.
+    expect(undoButton()).toBeEnabled();
+    for (let i = 0; i < 4; i++) {
+      fireEvent.keyDown(window, { key: "z" });
+    }
+    await waitFor(() => expect(undoButton()).toBeDisabled());
+  });
+
+  it("clears the selection when a cleanup replaces the image (R12)", async () => {
+    render(<ImagePrep catalogColors={[]} />);
+    const canvas = await enterFlatten();
+    await selectAt(canvas, 0.5, 0.5);
+    await screen.findByText("2 px selected");
+
+    fireEvent.click(screen.getByRole("button", { name: "Despeckle" }));
+    await waitFor(() => expect(screen.queryByText(/px selected/)).toBeNull());
+  });
+
+  it("disables the preset + Despeckle buttons while busy (R26)", async () => {
+    const view = render(<ImagePrep catalogColors={[]} />);
+    await enterFlatten();
+    mocks.busyRef.value = true;
+    view.rerender(<ImagePrep catalogColors={[]} />);
+    for (const label of ["Low", "Medium", "High", "Despeckle"]) {
+      expect(screen.getByRole("button", { name: label })).toBeDisabled();
+    }
+  });
+});
+
+describe("zoom / pan / expand (R23, R24)", () => {
+  it("scroll wheel zooms the transform toward the cursor without scrolling", async () => {
+    render(<ImagePrep catalogColors={[]} />);
+    await enterFlatten();
+    stubRect(viewport(), 100, 100);
+    expect(transform().style.transform).toContain("scale(1)");
+
+    fireEvent.wheel(viewport(), { deltaY: -100, clientX: 50, clientY: 50 });
+    expect(transform().style.transform).toContain("scale(1.25)");
+
+    // Scrolling back out returns toward the identity view.
+    fireEvent.wheel(viewport(), { deltaY: 100, clientX: 50, clientY: 50 });
+    expect(transform().style.transform).toContain("scale(1)");
+  });
+
+  it("middle-button drag pans the zoomed view", async () => {
+    render(<ImagePrep catalogColors={[]} />);
+    await enterFlatten();
+    stubRect(viewport(), 100, 100);
+    fireEvent.wheel(viewport(), { deltaY: -100, clientX: 50, clientY: 50 });
+    const zoomedOnly = transform().style.transform;
+
+    fireEvent.mouseDown(viewport(), { button: 1, clientX: 50, clientY: 50 });
+    fireEvent.mouseMove(window, { clientX: 60, clientY: 55 });
+    fireEvent.mouseUp(window);
+    expect(transform().style.transform).not.toBe(zoomedOnly); // panned
+    expect(transform().style.transform).toContain("scale(1.25)");
+  });
+
+  it("Space-held left drag pans and suppresses the selecting click (R23)", async () => {
+    render(<ImagePrep catalogColors={[]} />);
+    const canvas = await enterFlatten();
+    stubRect(viewport(), 100, 100);
+    stubRect(canvas, 2, 2);
+    fireEvent.wheel(viewport(), { deltaY: -100, clientX: 50, clientY: 50 });
+    const before = transform().style.transform;
+
+    fireEvent.keyDown(window, { code: "Space" });
+    fireEvent.mouseDown(viewport(), { button: 0, clientX: 50, clientY: 50 });
+    fireEvent.mouseMove(window, { clientX: 30, clientY: 40 });
+    fireEvent.mouseUp(window);
+    expect(transform().style.transform).not.toBe(before); // panned
+
+    // A click while Space is still held must NOT add a selection region.
+    fireEvent.click(canvas, { clientX: 0.5, clientY: 0.5 });
+    expect(screen.queryByText(/px selected/)).toBeNull();
+    fireEvent.keyUp(window, { code: "Space" });
+  });
+
+  it("Expand toggles the enlarged viewport (R23)", async () => {
+    render(<ImagePrep catalogColors={[]} />);
+    await enterFlatten();
+    const expand = screen.getByRole("button", { name: "Expand" });
+    expect(expand).toHaveAttribute("aria-pressed", "false");
+    expect(viewport().className).toContain("max-h-[60vh]");
+
+    fireEvent.click(expand);
+    expect(expand).toHaveAttribute("aria-pressed", "true");
+    expect(viewport().className).toContain("max-h-[85vh]");
+  });
+
+  it("resolves clicks to the correct pixel under a zoomed canvas box (R24)", async () => {
+    render(<ImagePrep catalogColors={[]} />);
+    const canvas = await enterFlatten();
+    // Simulate a 2× zoom: the 2×2 image's canvas box measures 4×4 on screen.
+    // A click at (1,1) still maps to image pixel (0,0) — the black region.
+    stubRect(canvas, 4, 4);
+    await selectAt(canvas, 1, 1);
+    expect(await screen.findByText("2 px selected")).toBeInTheDocument();
   });
 });

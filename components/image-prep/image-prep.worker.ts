@@ -7,10 +7,9 @@
  * `{ ok: false, error }`.
  *
  * 12_flatten extends the dispatch with the `mask` and `flatten` ops backed by
- * `lib/flatten-core.ts` (R4–R6, R9, R16, R17, R26). Phase A shipped flood masks
- * and `fill`; Phase B adds smooth masks, catch-strays, and `recolor`. The
- * `removeSmall` action throws a clear error over the same `{ ok: false }` path
- * until Phase C lands.
+ * `lib/flatten-core.ts` (R4–R6, R9, R16–R19, R26). Phase A shipped flood masks
+ * and `fill`; Phase B added smooth masks, catch-strays, and `recolor`; Phase C
+ * adds the `removeSmall` action (Despeckle + the Low/Medium/High presets).
  */
 
 import {
@@ -33,6 +32,7 @@ import {
   floodMask,
   maskPixelCount,
   recolorExact,
+  removeSmallRegions,
   smoothMask,
   type Mask,
 } from "@/lib/flatten-core";
@@ -176,13 +176,10 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
           height: req.height,
           data: new Uint8ClampedArray(req.buffer),
         };
-        if (req.action.kind === "removeSmall") {
-          throw new Error(
-            `The "${req.action.kind}" flatten action is not available yet`,
-          );
-        }
         let result: PixelBuffer;
-        if (req.action.kind === "recolor") {
+        if (req.action.kind === "removeSmall") {
+          result = removeSmallRegions(src, req.action.maxRegionPx);
+        } else if (req.action.kind === "recolor") {
           result = recolorExact(src, req.action.from, req.action.to);
         } else {
           const mask: Mask = {

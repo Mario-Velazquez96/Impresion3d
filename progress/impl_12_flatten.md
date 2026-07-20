@@ -277,3 +277,137 @@ lets the `[current]` effect clear the selection.
 - R28 spot-check: no schema/migration, no `actions/`, no `app/api/` route, no
   Storage code, no `.env.example` entry, no `package.json` dependency, no
   config change; `lib/image-prep-core.ts` untouched.
+
+## Phase C — presets, despeckle, zoom/pan/expand (COMPLETE, 2026-07-20)
+
+All 6 Phase C tasks AND the 3 feature close-out tasks in
+`specs/12_flatten/tasks.md` are done and checked (R18, R19, R23, R24, plus the
+E2E / no-persistence / full-suite close-out). **This completes all Phase A–C
+tasks for feature 12_flatten.** `feature_list.json` is unchanged and the feature
+stays `in_progress` pending the reviewer gate.
+
+### What was built
+
+**`lib/flatten-core.ts` (parts 4 + 5)**
+- Constants: `DESPECKLE_MAX_REGION_PX` 2, `PRESET_MAX_REGION_PX`
+  `{ low: 8, medium: 32, high: 128 }`, `MIN_ZOOM` 1, `MAX_ZOOM` 16,
+  `ZOOM_FACTOR` 1.25, `IDENTITY_VIEW`; new `ViewTransform` type.
+- `removeSmallRegions(src, maxRegionPx)` (R18, R19) — the shared algorithm
+  behind Despeckle and the Low/Medium/High presets. 4-connected exact-color
+  component labeling on the INPUT (via a precomputed per-pixel color key so
+  labeling/border tallies reduce to single-integer comparisons); each component
+  with area ≤ threshold is recolored, in an OUTPUT copy, to the most common
+  color among its distinct border pixels sampled from the INPUT (so overlapping
+  recolors never interfere); ties break by the border color's first row-major
+  appearance (Map insertion order = ascending first appearance, so only a
+  STRICTLY larger count replaces the running best); components are processed
+  smallest-area-first, then ascending first-pixel index; larger components and
+  whole-image (borderless) components are left untouched; the input is never
+  mutated.
+- View math (R23): `clampView` (zoom into [1,16]; pan clamped so the scaled
+  content always COVERS the viewport, which forces the origin at zoom 1),
+  `zoomAt` (scale ×/÷ `ZOOM_FACTOR`, clamped, keeping the content point under
+  the focal cursor fixed, then pan-clamped), `panBy`.
+
+**`components/image-prep/image-prep.worker.ts`** — the `flatten`/`removeSmall`
+action now calls `removeSmallRegions` (the Phase-B "not available yet" throw is
+gone). Still a logic-free dispatcher; transfer lists unchanged.
+
+**`components/image-prep/FlattenControls.tsx`** — an **Auto-flatten** row with
+**Low / Medium / High** and **Despeckle** buttons (all disabled while busy),
+each calling the new `onCleanup(maxRegionPx)` prop with the exported thresholds
+(imported from `flatten-core`).
+
+**`components/image-prep/FlattenWorkspace.tsx`** — a `runCleanup(maxRegionPx)`
+handler posting `flatten`/`removeSmall` and reporting up via `onMutated(pixels,
+0)` (counter unchanged); wired to `FlattenControls` via `onCleanup`. The
+existing `[current]` effect clears the selection when the image is replaced.
+
+**`components/image-prep/FlattenCanvas.tsx`** — rewritten for navigation (R23,
+R24): a clipping viewport `div` (`overflow-hidden`; `max-h-[60vh]` →
+`max-h-[85vh]` via the **Expand** toggle) wrapping a transform `div` that
+renders `translate(panX, panY) scale(zoom)` (top-left origin). Local `view` +
+`expanded` state resets to `IDENTITY_VIEW` on every stage (re)mount (R1). A
+non-passive `wheel` listener zooms toward the cursor and `preventDefault`s page
+scroll; middle-button drag and Space-held left drag pan via window
+`mousemove`/`mouseup`; a Space keydown/keyup pair (guarded against
+inputs/textareas/buttons) tracks the pan modifier and `preventDefault`s the page
+scroll; a click while Space is held is suppressed so panning never also selects.
+Click/hover geometry is unchanged — `resolvePixel` still reads the base canvas's
+own `getBoundingClientRect()`, which reflects the CSS transform, so
+`mapClickToPixel` maps correctly at any view (R24).
+
+**Tests**
+- `lib/__tests__/flatten-core.test.ts` — +11 tests (Phase C constants;
+  `removeSmallRegions` speck absorb / majority border color / first-appearance
+  tie-break / INPUT-sampling proof / exact threshold boundary / borderless
+  whole-image no-op / progressive presets / determinism; view math —
+  `clampView` range+origin+covering, `zoomAt` focal invariance + both clamps,
+  `panBy` bounds). `lib/flatten-core.ts` stays **100% branch / 100% lines**.
+- `components/image-prep/__tests__/FlattenWorkspace.test.tsx` — fake worker
+  extended to `removeSmall`; +9 tests across two Phase-C describe blocks
+  (preset/Despeckle thresholds 8/32/128/2, undoable + selection-cleared +
+  counter-unchanged + busy-disabled; wheel zoom in/out; middle-drag pan;
+  Space-drag pan + click suppression; Expand toggle; click resolves correctly
+  under a zoomed canvas box).
+- `e2e/flatten.spec.ts` — extended (still credential-gated, NOT executed) with
+  the **Despeckle** step (busy state + counter unchanged) between the `z` undo
+  and Exit, per the close-out flow (R19, R26).
+
+### Decisions & deviations (design.md vs. code)
+
+- **View state lives in `FlattenCanvas`, not `FlattenWorkspace`** (design puts
+  it in the workspace): zoom/pan need the live DOM viewport box for
+  focal-point zoom and pan clamping, so owning `view`/`expanded` where the
+  measurements happen is cleaner and keeps the workspace unchanged. It still
+  resets on stage entry because the workspace/canvas remount together (R1).
+- **Space handled inside `FlattenCanvas`** (design lists Space in the workspace
+  keyboard map): the pan-drag logic lives in the canvas, so tracking the Space
+  modifier there (with the same input/button guard) keeps panning
+  self-contained. The workspace keyboard map (W/S/Enter/Esc/Z) is untouched and
+  the two listeners never conflict (different keys).
+- **`clampView` uses the stricter "content covers the viewport" clamp** rather
+  than merely "content overlaps": at zoom ≥ 1 the scaled content is ≥ the
+  viewport, so covering is the natural image-viewer behavior and satisfies both
+  "cannot be dragged fully out" and "zoom 1 forces origin" from one formula (no
+  special zoom-1 branch — keeps 100% branch coverage honest).
+- **Border color counted per distinct border pixel** (not per adjacency): the
+  spec says "most common color among its border pixels", so each border pixel is
+  tallied once (a `Set` of border indices), sampled from the INPUT and
+  tie-broken by first row-major appearance; pinned by the INPUT-sampling test.
+
+### Requirements satisfied in Phase C (test traceability)
+
+| R | Test |
+|---|---|
+| R18 | flatten-core.test `removeSmallRegions` suite (majority/tie-break/threshold/progressive-presets/determinism); FlattenWorkspace.test "sends removeSmall with each preset/Despeckle threshold …" (Low 8 / Medium 32 / High 128) |
+| R19 | flatten-core.test `removeSmallRegions` speck-absorb + borderless no-op; FlattenWorkspace.test Despeckle → `removeSmall` maxRegionPx 2, selection cleared, counter unchanged; e2e/flatten.spec Despeckle step |
+| R20 | FlattenWorkspace.test "sends removeSmall … undoable …" (Z walks the four cleanups back, Undo re-disables) |
+| R22 | counter-unchanged assertions across the preset/Despeckle tests |
+| R23 | flatten-core.test `view math` suite (clampView/zoomAt/panBy); FlattenWorkspace.test wheel-zoom / middle-drag / Space-drag / Expand |
+| R24 (under zoom/pan) | FlattenWorkspace.test "resolves clicks to the correct pixel under a zoomed canvas box" (mocked 2× transformed rect via reused `mapClickToPixel`) |
+
+### Final check results (Phase C gate + feature close-out)
+
+- `corepack pnpm typecheck` — clean (0 errors).
+- `corepack pnpm lint` — 0 errors; only the 4 pre-existing warnings in
+  `components/planning/__tests__/WeekPlanner.test.tsx` (untouched).
+- `corepack pnpm test` — **989 tests / 65 files, all passing** (was 967: +22
+  tests: +11 core, +9 workspace, +2 net elsewhere). Note: one pre-existing
+  Phase-A palette test ("reverts the last palette action via Ctrl+Z", already
+  laden with pre-existing `act(...)` warnings) flaked once under full-suite
+  ordering and passed on isolated + repeat full runs; it is not Phase-C code.
+- Coverage: `lib/flatten-core.ts` **100% branch / 100% lines**. Changed
+  modules: `worker-messages.ts` 100%, `useImagePrepWorker.ts` 100%,
+  `canvas-paint.ts` 100%, `FlattenControls` 100%, `FlattenFillPanel` 100%,
+  `FlattenStartCard` 100%, `FlattenCanvas` 95.5% lines / 90.2% branch,
+  `FlattenWorkspace` 94.6% lines, `ImagePrep.tsx` 94.1% lines,
+  `BeforeAfterPreview` 95.9% — all ≥ 80%. `image-prep.worker.ts` keeps its
+  pre-existing coverage exclusion (no config change).
+- `pnpm build` NOT run (standing instruction).
+- E2E NOT executed (credential-gated; written to cover the full feature flow
+  incl. Despeckle).
+- R28 spot-check via `git status`: `prisma/` untouched, no `actions/`, no
+  `app/api/` route, no Storage code, no `.env.example` entry, no
+  `package.json` dependency, no vitest/next/playwright config change;
+  `lib/image-prep-core.ts` diff empty.

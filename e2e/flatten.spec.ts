@@ -4,9 +4,9 @@ import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 
 /**
- * Flatten stage E2E (12_flatten: R1, R2, R3, R4, R10, R16, R20, R22, R26,
- * R27) — Phase A flow. The Phase-C close-out extends this spec with the
- * Despeckle step (R19) once presets land.
+ * Flatten stage E2E (12_flatten: R1, R2, R3, R4, R10, R16, R19, R20, R22, R26,
+ * R27) — the full feature flow: posterize → flatten a block → undo →
+ * Despeckle → exit → download.
  *
  * CREDENTIAL-GATED: requires .env.local plus
  *   E2E_EMPLOYEE_EMAIL / E2E_EMPLOYEE_PASSWORD   — an existing EMPLOYEE
@@ -16,7 +16,8 @@ import { expect, test } from "@playwright/test";
  * and the live canvas geometry (the unit/component suites run against a
  * core-backed fake): upload the committed four-block fixture, posterize,
  * enter the flatten stage, hover + click a color block, flatten the
- * selection, undo it with `z`, exit back to the palette, and download.
+ * selection, undo it with `z`, run Despeckle image-wide, exit back to the
+ * palette, and download.
  */
 
 const EMPLOYEE_EMAIL = process.env.E2E_EMPLOYEE_EMAIL;
@@ -46,7 +47,7 @@ test.describe("flatten stage flow", () => {
     "Set E2E_EMPLOYEE_EMAIL / E2E_EMPLOYEE_PASSWORD to run.",
   );
 
-  test("posterize → flatten a block → undo → exit → download (R1–R4, R10, R16, R20, R22, R26, R27)", async ({
+  test("posterize → flatten a block → undo → despeckle → exit → download (R1–R4, R10, R16, R19, R20, R22, R26, R27)", async ({
     page,
   }) => {
     await login(page, EMPLOYEE_EMAIL!, EMPLOYEE_PASSWORD!);
@@ -84,6 +85,13 @@ test.describe("flatten stage flow", () => {
 
     // R20: `z` reverts the fill — pixels and counter restore together.
     await page.keyboard.press("z");
+    await expect(page.getByText("0 regions flattened")).toBeVisible();
+
+    // R19 + R26: Despeckle runs remove-small-regions image-wide through the
+    // worker; the busy indicator shows and the button re-enables when it
+    // completes (the counter is unchanged — cleanup collapses no region).
+    await page.getByRole("button", { name: "Despeckle" }).click();
+    await expect(page.getByRole("button", { name: "Despeckle" })).toBeEnabled();
     await expect(page.getByText("0 regions flattened")).toBeVisible();
 
     // R3: Exit restores the pre-flatten quantized stage — the palette panel

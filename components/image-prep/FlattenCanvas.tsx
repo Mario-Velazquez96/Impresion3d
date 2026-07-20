@@ -1,21 +1,27 @@
 "use client";
 
-import { useEffect, useRef, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 
 import { mapClickToPixel } from "@/components/image-prep/BeforeAfterPreview";
 import { paint } from "@/components/image-prep/canvas-paint";
+import { IDENTITY_VIEW, panBy, zoomAt } from "@/lib/flatten-core";
 import { downloadFileName, type PixelBuffer } from "@/lib/image-prep-core";
 
 /**
- * The interactive flatten canvas (12_flatten: R4, R24, R25, R27): the flatten
- * working image with an overlay canvas for the hover/selection outlines, the
- * keyboard-hints strip, and Download PNG. Pointer positions resolve to image
- * pixels by reusing the R21 geometry (`mapClickToPixel`) against the canvas
- * box — letterbox positions resolve to `null` and are reported as such, so
- * the workspace clears the hover mask over the margins (R24).
+ * The interactive flatten canvas (12_flatten: R4, R23, R24, R25, R27): the
+ * flatten working image with an overlay canvas for the hover/selection
+ * outlines, scroll zoom + drag pan + an Expand toggle, the keyboard-hints
+ * strip, and Download PNG. Pointer positions resolve to image pixels by reusing
+ * the R21 geometry (`mapClickToPixel`) against the canvas's own
+ * `getBoundingClientRect()` — which already reflects the CSS zoom/pan transform,
+ * so the same math works at any view and letterbox positions resolve to `null`
+ * (R24).
  *
- * Phase A renders at the identity view; scroll zoom, panning, and the Expand
- * toggle arrive in Phase C (R23).
+ * The view (zoom/pan/expand) is local to this canvas: it needs the live DOM
+ * viewport box for focal-point zoom and pan clamping, and it resets to the
+ * identity view whenever the flatten stage (re)mounts this component (R1, R23).
+ * A non-passive `wheel` listener lets us `preventDefault` the page scroll;
+ * panning is middle-button drag or Space-held left drag.
  */
 export function FlattenCanvas({
   current,
@@ -40,6 +46,16 @@ export function FlattenCanvas({
 }) {
   const baseRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+
+  const [view, setView] = useState(IDENTITY_VIEW);
+  const [expanded, setExpanded] = useState(false);
+
+  // Drag-pan bookkeeping: the last pointer position while a pan is active, and
+  // whether Space is held (Space + left drag pans instead of selecting). Refs,
+  // not state, so the fast-moving pointer path never re-renders.
+  const panFromRef = useRef<{ x: number; y: number } | null>(null);
+  const spaceHeldRef = useRef(false);
 
   useEffect(() => {
     paint(baseRef.current, current);
@@ -55,8 +71,102 @@ export function FlattenCanvas({
     }
   }, [overlay, current]);
 
-  // DOM glue stays thin: read the box, defer the math to the pure
-  // `mapClickToPixel` (unit-tested in the R21 suite), report the pixel.
+  // Scroll zoom (R23): non-passive so `preventDefault` stops the page from
+  // scrolling; zoom toward the cursor within [MIN_ZOOM, MAX_ZOOM].
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) {
+      return;
+    }
+    function onWheel(event: WheelEvent) {
+      event.preventDefault();
+      const rect = el!.getBoundingClientRect();
+      const direction = event.deltaY < 0 ? 1 : -1;
+      setView((v) =>
+        zoomAt(
+          v,
+          direction,
+          event.clientX - rect.left,
+          event.clientY - rect.top,
+          rect.width,
+          rect.height,
+        ),
+      );
+    }
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  // Space tracking for Space + left-drag panning (R23); guarded against text
+  // inputs and stopping the page from scrolling while held.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.code !== "Space") {
+        return;
+      }
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLButtonElement
+      ) {
+        return;
+      }
+      spaceHeldRef.current = true;
+      event.preventDefault();
+    }
+    function onKeyUp(event: KeyboardEvent) {
+      if (event.code === "Space") {
+        spaceHeldRef.current = false;
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, []);
+
+  // Drag-pan move/end live on the window so the drag survives the pointer
+  // leaving the viewport (R23).
+  useEffect(() => {
+    function onMove(event: globalThis.MouseEvent) {
+      const from = panFromRef.current;
+      if (!from) {
+        return;
+      }
+      const rect = viewportRef.current?.getBoundingClientRect();
+      if (!rect) {
+        return;
+      }
+      const dx = event.clientX - from.x;
+      const dy = event.clientY - from.y;
+      panFromRef.current = { x: event.clientX, y: event.clientY };
+      setView((v) => panBy(v, dx, dy, rect.width, rect.height));
+    }
+    function onUp() {
+      panFromRef.current = null;
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
+
+  // A middle-button press, or a left press while Space is held, begins a pan
+  // rather than a hover/select interaction (R23).
+  function handlePanStart(event: MouseEvent<HTMLDivElement>) {
+    if (event.button === 1 || (event.button === 0 && spaceHeldRef.current)) {
+      event.preventDefault();
+      panFromRef.current = { x: event.clientX, y: event.clientY };
+    }
+  }
+
+  // DOM glue stays thin: read the canvas box (already transformed by the CSS
+  // zoom/pan), defer the math to the pure `mapClickToPixel`, report the pixel.
   function resolvePixel(event: MouseEvent<HTMLCanvasElement>) {
     const canvas = event.currentTarget;
     const rect = canvas.getBoundingClientRect();
@@ -75,6 +185,10 @@ export function FlattenCanvas({
   }
 
   function handleClick(event: MouseEvent<HTMLCanvasElement>) {
+    // While Space is held the left button pans, so it must not also select.
+    if (spaceHeldRef.current) {
+      return;
+    }
     const mapped = resolvePixel(event);
     if (mapped) {
       onClickPixel(mapped.x, mapped.y);
@@ -109,25 +223,55 @@ export function FlattenCanvas({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="relative">
-        <canvas
-          ref={baseRef}
-          aria-label="Flatten canvas"
-          onMouseMove={handleMouseMove}
-          onMouseLeave={() => onHoverPixel(null)}
-          onClick={handleClick}
-          className={`mx-auto h-auto max-h-[60vh] w-full max-w-full rounded-md border object-contain ${
-            pickMode ? "cursor-crosshair" : ""
+      <div className="flex justify-end">
+        <button
+          type="button"
+          aria-pressed={expanded}
+          onClick={() => setExpanded((on) => !on)}
+          className={`h-8 rounded-md border px-2 text-xs hover:bg-accent ${
+            expanded ? "bg-accent ring-2 ring-ring" : ""
           }`}
-        />
-        {overlay ? (
+        >
+          Expand
+        </button>
+      </div>
+
+      {/* Viewport clips the zoomed/panned content; the wrapper carries the
+          CSS transform so the canvas box reflects the current view (R23, R24). */}
+      <div
+        ref={viewportRef}
+        data-testid="flatten-viewport"
+        onMouseDown={handlePanStart}
+        className={`relative overflow-hidden rounded-md border ${
+          expanded ? "max-h-[85vh]" : "max-h-[60vh]"
+        }`}
+      >
+        <div
+          data-testid="flatten-transform"
+          className="origin-top-left"
+          style={{
+            transform: `translate(${view.panX}px, ${view.panY}px) scale(${view.zoom})`,
+          }}
+        >
           <canvas
-            ref={overlayRef}
-            aria-hidden="true"
-            data-testid="flatten-overlay"
-            className="pointer-events-none absolute inset-0 h-full w-full rounded-md border border-transparent object-contain"
+            ref={baseRef}
+            aria-label="Flatten canvas"
+            onMouseMove={handleMouseMove}
+            onMouseLeave={() => onHoverPixel(null)}
+            onClick={handleClick}
+            className={`h-auto w-full max-w-full object-contain ${
+              pickMode ? "cursor-crosshair" : ""
+            }`}
           />
-        ) : null}
+          {overlay ? (
+            <canvas
+              ref={overlayRef}
+              aria-hidden="true"
+              data-testid="flatten-overlay"
+              className="pointer-events-none absolute inset-0 h-full w-full object-contain"
+            />
+          ) : null}
+        </div>
       </div>
 
       {/* Keyboard-hints strip (R25). */}

@@ -15,8 +15,9 @@
  * Phase A ships the flood/brush mask builders, mask set operations, selection
  * statistics, fill application, and the canvas overlay builder (R5, R7,
  * R10–R16). Phase B adds the smooth mask builder, stray-island capture, and
- * exact-color recolor (R6, R9, R17). Remove-small-regions and view math land
- * in Phase C.
+ * exact-color recolor (R6, R9, R17). Phase C adds remove-small-regions (the
+ * shared algorithm behind Despeckle and the Low/Medium/High presets) and the
+ * zoom/pan view math (R18, R19, R23).
  */
 
 import {
@@ -36,6 +37,13 @@ export type MaskMode = "flood" | "smooth" | "brush";
 
 /** One exact color and how many masked pixels carry it (R13). */
 export type ColorCount = { color: Rgb; count: number };
+
+/**
+ * Flatten-canvas view: a CSS-transform zoom + pan in canvas-box pixels (R23).
+ * The transform wrapper renders `translate(panX, panY) scale(zoom)` with a
+ * top-left origin, so a content point `c` maps to screen `pan + zoom · c`.
+ */
+export type ViewTransform = { zoom: number; panX: number; panY: number };
 
 // ---- constants (exported so tests + UI pin the same values) -----------------
 
@@ -68,6 +76,22 @@ export const MAX_RUNNER_UPS = 6;
 
 /** Bounded flatten undo history — oldest snapshots drop first (R20). */
 export const MAX_FLATTEN_HISTORY = 12;
+
+/** Despeckle threshold: isolated stray pixels/pairs — HueForge spikes (R19). */
+export const DESPECKLE_MAX_REGION_PX = 2;
+/**
+ * Auto-flatten preset thresholds (R18): a preset recolors every 4-connected
+ * exact-color region whose area is at or below the level's value to its most
+ * common border color. Low nudges away specks; High collapses larger patches.
+ */
+export const PRESET_MAX_REGION_PX = { low: 8, medium: 32, high: 128 } as const;
+
+/** Zoom limits and per-notch factor for the flatten canvas (R23). */
+export const MIN_ZOOM = 1;
+export const MAX_ZOOM = 16;
+export const ZOOM_FACTOR = 1.25;
+/** The reset view: zoom 1, no pan (R1, R23). */
+export const IDENTITY_VIEW: ViewTransform = { zoom: 1, panX: 0, panY: 0 };
 
 /** Hover-mask outline color (white), RGBA (R4). */
 export const HOVER_OUTLINE_RGBA = [255, 255, 255, 230] as const;
@@ -613,4 +637,230 @@ export function buildFlattenOverlay(args: {
     }
   }
   return out;
+}
+
+// ---- whole-image cleanup (R18, R19) -----------------------------------------
+
+/**
+ * Remove-small-regions (R18, R19) — the shared algorithm behind Despeckle
+ * (`DESPECKLE_MAX_REGION_PX`) and the Low/Medium/High presets
+ * (`PRESET_MAX_REGION_PX`). Label every 4-connected EXACT-color component on
+ * the INPUT; each component whose area is ≤ `maxRegionPx` is recolored — in an
+ * OUTPUT copy — to the most common color among its border pixels, sampled from
+ * the INPUT so overlapping recolors never interfere. Ties break by the border
+ * color's first row-major appearance; components are processed smallest-area
+ * first, then by ascending first-pixel index. Larger components are left
+ * untouched and the input buffer is never mutated.
+ */
+export function removeSmallRegions(
+  src: PixelBuffer,
+  maxRegionPx: number,
+): PixelBuffer {
+  const { width, height, data } = src;
+  const total = width * height;
+  const out = data.slice();
+
+  // Precompute an exact-color key per pixel: labeling and border tallies both
+  // reduce to a single integer comparison (keeps this branch-simple).
+  const keys = new Int32Array(total);
+  for (let i = 0; i < total; i++) {
+    const offset = i * 4;
+    keys[i] = (data[offset] << 16) | (data[offset + 1] << 8) | data[offset + 2];
+  }
+
+  const labels = new Int32Array(total).fill(-1);
+  const queue = new Int32Array(total);
+  const lastRowStart = width * (height - 1);
+  const components: { indices: number[]; first: number }[] = [];
+
+  for (let start = 0; start < total; start++) {
+    if (labels[start] !== -1) {
+      continue;
+    }
+    const label = components.length;
+    const key = keys[start];
+    let head = 0;
+    let tail = 0;
+    labels[start] = label;
+    queue[tail++] = start;
+    const indices: number[] = [];
+    while (head < tail) {
+      const index = queue[head++];
+      indices.push(index);
+      const x = index % width;
+      const tryPixel = (neighbor: number) => {
+        if (labels[neighbor] === -1 && keys[neighbor] === key) {
+          labels[neighbor] = label;
+          queue[tail++] = neighbor;
+        }
+      };
+      if (x > 0) {
+        tryPixel(index - 1);
+      }
+      if (x < width - 1) {
+        tryPixel(index + 1);
+      }
+      if (index >= width) {
+        tryPixel(index - width);
+      }
+      if (index < lastRowStart) {
+        tryPixel(index + width);
+      }
+    }
+    // `start` is the smallest index in the component (all smaller pixels are
+    // already labeled), so it is the deterministic first-pixel tie-break.
+    components.push({ indices, first: start });
+  }
+
+  // Smallest regions first, then earliest first-pixel — a stable, documented
+  // processing order (R18).
+  const order = components
+    .map((_, i) => i)
+    .sort(
+      (a, b) =>
+        components[a].indices.length - components[b].indices.length ||
+        components[a].first - components[b].first,
+    );
+
+  for (const label of order) {
+    const component = components[label];
+    if (component.indices.length > maxRegionPx) {
+      continue;
+    }
+    // Distinct border pixels: in-bounds 4-neighbors outside this component.
+    const border = new Set<number>();
+    for (const index of component.indices) {
+      const x = index % width;
+      const addBorder = (neighbor: number) => {
+        if (labels[neighbor] !== label) {
+          border.add(neighbor);
+        }
+      };
+      if (x > 0) {
+        addBorder(index - 1);
+      }
+      if (x < width - 1) {
+        addBorder(index + 1);
+      }
+      if (index >= width) {
+        addBorder(index - width);
+      }
+      if (index < lastRowStart) {
+        addBorder(index + width);
+      }
+    }
+    if (border.size === 0) {
+      continue; // the component is the whole image — nothing to recolor to
+    }
+    // Tally border colors from the INPUT, visiting borders in row-major order
+    // so Map insertion order is ascending first-appearance (the tie-break).
+    const sorted = [...border].sort((a, b) => a - b);
+    const tally = new Map<number, { count: number; color: Rgb }>();
+    for (const neighbor of sorted) {
+      const key = keys[neighbor];
+      const existing = tally.get(key);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        const offset = neighbor * 4;
+        tally.set(key, {
+          count: 1,
+          color: {
+            r: data[offset],
+            g: data[offset + 1],
+            b: data[offset + 2],
+          },
+        });
+      }
+    }
+    // Most common wins; because entries are already in ascending
+    // first-appearance order, only a STRICTLY larger count replaces the
+    // current best — which is exactly the first-appearance tie-break (R18).
+    const entries = [...tally.values()];
+    let best = entries[0];
+    for (let i = 1; i < entries.length; i++) {
+      if (entries[i].count > best.count) {
+        best = entries[i];
+      }
+    }
+    for (const index of component.indices) {
+      const offset = index * 4;
+      out[offset] = best.color.r;
+      out[offset + 1] = best.color.g;
+      out[offset + 2] = best.color.b;
+    }
+  }
+
+  return { width, height, data: out };
+}
+
+// ---- view math (R23) --------------------------------------------------------
+
+/**
+ * Clamp a view: zoom into [MIN_ZOOM, MAX_ZOOM]; pan so the scaled content
+ * always COVERS the viewport (it can never be dragged to reveal a margin),
+ * which at zoom 1 forces the origin (0, 0) since the content already fills the
+ * box (R23).
+ */
+export function clampView(
+  view: ViewTransform,
+  boxW: number,
+  boxH: number,
+): ViewTransform {
+  const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, view.zoom));
+  const minPanX = boxW * (1 - zoom);
+  const minPanY = boxH * (1 - zoom);
+  return {
+    zoom,
+    panX: Math.min(0, Math.max(minPanX, view.panX)),
+    panY: Math.min(0, Math.max(minPanY, view.panY)),
+  };
+}
+
+/**
+ * Zoom one notch toward a focal point (R23): scale the zoom by `ZOOM_FACTOR`
+ * (direction 1) or divide by it (direction -1), clamped, then adjust the pan
+ * so the content point currently under `(focalX, focalY)` stays put — finally
+ * clamping the pan so the content still covers the viewport.
+ */
+export function zoomAt(
+  view: ViewTransform,
+  direction: 1 | -1,
+  focalX: number,
+  focalY: number,
+  boxW: number,
+  boxH: number,
+): ViewTransform {
+  const nextZoom = Math.min(
+    MAX_ZOOM,
+    Math.max(
+      MIN_ZOOM,
+      direction === 1 ? view.zoom * ZOOM_FACTOR : view.zoom / ZOOM_FACTOR,
+    ),
+  );
+  const ratio = nextZoom / view.zoom;
+  return clampView(
+    {
+      zoom: nextZoom,
+      panX: focalX - ratio * (focalX - view.panX),
+      panY: focalY - ratio * (focalY - view.panY),
+    },
+    boxW,
+    boxH,
+  );
+}
+
+/** Pan by a screen-pixel delta, clamped to keep the content covering (R23). */
+export function panBy(
+  view: ViewTransform,
+  dx: number,
+  dy: number,
+  boxW: number,
+  boxH: number,
+): ViewTransform {
+  return clampView(
+    { zoom: view.zoom, panX: view.panX + dx, panY: view.panY + dy },
+    boxW,
+    boxH,
+  );
 }
