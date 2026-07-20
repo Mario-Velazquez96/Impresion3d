@@ -187,6 +187,16 @@ function stubRect(canvas: HTMLElement, width: number, height: number) {
   } as DOMRect);
 }
 
+// jsdom performs no layout, so `offsetWidth/Height` (the UNTRANSFORMED content
+// box the pan bounds are derived from) are always 0; stub them.
+function stubLayout(el: HTMLElement, width: number, height: number) {
+  Object.defineProperty(el, "offsetWidth", { value: width, configurable: true });
+  Object.defineProperty(el, "offsetHeight", {
+    value: height,
+    configurable: true,
+  });
+}
+
 function makeFile(name: string): File {
   return new File([new Uint8Array(8)], name, { type: "image/png" });
 }
@@ -920,6 +930,38 @@ describe("zoom / pan / expand (R23, R24)", () => {
     fireEvent.click(expand);
     expect(expand).toHaveAttribute("aria-pressed", "true");
     expect(viewport().className).toContain("max-h-[85vh]");
+  });
+
+  it("fits the whole image in the viewport at zoom 1 and follows Expand (R23)", async () => {
+    render(<ImagePrep catalogColors={[]} />);
+    const canvas = await enterFlatten();
+    // The canvas is capped by the SAME height as the viewport, so a tall image
+    // is fitted rather than overflowing the clipped box.
+    expect(canvas.className).toContain("max-h-[60vh]");
+    expect(canvas.className).toContain("object-contain");
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    expect(canvas.className).toContain("max-h-[85vh]");
+    expect(viewport().className).toContain("max-h-[85vh]");
+  });
+
+  it("pans at zoom 1 when the content overflows the viewport (regression)", async () => {
+    render(<ImagePrep catalogColors={[]} />);
+    const canvas = await enterFlatten();
+    stubRect(viewport(), 100, 100);
+    // Layout size of the content: 400×900 inside a 100×100 box — the reported
+    // bug's shape (bottom clipped and previously unreachable at zoom 1).
+    stubLayout(canvas, 400, 900);
+    // Expand re-runs the measurement effect so the stub is picked up.
+    fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+    expect(transform().style.transform).toContain("scale(1)");
+
+    fireEvent.mouseDown(viewport(), { button: 1, clientX: 50, clientY: 90 });
+    fireEvent.mouseMove(window, { clientX: 50, clientY: 50 });
+    fireEvent.mouseUp(window);
+    // Dragged up 40px at zoom 1: the view moved, revealing the bottom.
+    expect(transform().style.transform).toContain("translate(0px, -40px)");
+    expect(transform().style.transform).toContain("scale(1)");
   });
 
   it("resolves clicks to the correct pixel under a zoomed canvas box (R24)", async () => {

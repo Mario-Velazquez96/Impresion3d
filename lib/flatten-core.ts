@@ -798,18 +798,27 @@ export function removeSmallRegions(
 
 /**
  * Clamp a view: zoom into [MIN_ZOOM, MAX_ZOOM]; pan so the scaled content
- * always COVERS the viewport (it can never be dragged to reveal a margin),
- * which at zoom 1 forces the origin (0, 0) since the content already fills the
- * box (R23).
+ * never exposes a margin on the leading edge (pan ≤ 0) nor past its own
+ * trailing edge (pan ≥ box − content · zoom) (R23).
+ *
+ * The bounds derive from the CONTENT's untransformed layout size
+ * (`contentW`/`contentH`), NOT from the viewport: the content is only
+ * guaranteed to fill the viewport at zoom 1 when it happens to be exactly as
+ * large as the box. `Math.min(0, …)` keeps the origin forced on an axis where
+ * the scaled content FITS inside the box (nothing to reveal), while an axis
+ * whose scaled content OVERFLOWS stays pannable — including at zoom 1, which
+ * is how a tall image's clipped bottom is reached.
  */
 export function clampView(
   view: ViewTransform,
   boxW: number,
   boxH: number,
+  contentW: number,
+  contentH: number,
 ): ViewTransform {
   const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, view.zoom));
-  const minPanX = boxW * (1 - zoom);
-  const minPanY = boxH * (1 - zoom);
+  const minPanX = Math.min(0, boxW - contentW * zoom);
+  const minPanY = Math.min(0, boxH - contentH * zoom);
   return {
     zoom,
     panX: Math.min(0, Math.max(minPanX, view.panX)),
@@ -821,7 +830,7 @@ export function clampView(
  * Zoom one notch toward a focal point (R23): scale the zoom by `ZOOM_FACTOR`
  * (direction 1) or divide by it (direction -1), clamped, then adjust the pan
  * so the content point currently under `(focalX, focalY)` stays put — finally
- * clamping the pan so the content still covers the viewport.
+ * clamping the pan against the CONTENT bounds (see `clampView`).
  */
 export function zoomAt(
   view: ViewTransform,
@@ -830,6 +839,8 @@ export function zoomAt(
   focalY: number,
   boxW: number,
   boxH: number,
+  contentW: number,
+  contentH: number,
 ): ViewTransform {
   const nextZoom = Math.min(
     MAX_ZOOM,
@@ -847,20 +858,26 @@ export function zoomAt(
     },
     boxW,
     boxH,
+    contentW,
+    contentH,
   );
 }
 
-/** Pan by a screen-pixel delta, clamped to keep the content covering (R23). */
+/** Pan by a screen-pixel delta, clamped to the content bounds (R23). */
 export function panBy(
   view: ViewTransform,
   dx: number,
   dy: number,
   boxW: number,
   boxH: number,
+  contentW: number,
+  contentH: number,
 ): ViewTransform {
   return clampView(
     { zoom: view.zoom, panX: view.panX + dx, panY: view.panY + dy },
     boxW,
     boxH,
+    contentW,
+    contentH,
   );
 }

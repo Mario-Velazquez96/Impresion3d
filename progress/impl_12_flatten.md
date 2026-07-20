@@ -411,3 +411,79 @@ own `getBoundingClientRect()`, which reflects the CSS transform, so
   `app/api/` route, no Storage code, no `.env.example` entry, no
   `package.json` dependency, no vitest/next/playwright config change;
   `lib/image-prep-core.ts` diff empty.
+
+## Bug fixes (post-ship, 2026-07-20)
+
+**Report:** "the flatten functionality is working well, however there is a bug,
+it doesn't let me move through the image, so I can not see the bottom part of
+the image." Screenshot: a wide image whose bottom is clipped by the flatten
+viewport, unreachable.
+
+**Root cause.** `clampView` derived the pan bounds from the VIEWPORT box and
+treated it as the content size:
+
+```ts
+const minPanX = boxW * (1 - zoom);   // ⇒ 0 at zoom 1
+const minPanY = boxH * (1 - zoom);   // ⇒ 0 at zoom 1
+```
+
+That is only correct when the content exactly fills the viewport at zoom 1. It
+did not: the base canvas was `h-auto w-full` (width-driven) inside a viewport
+that is `overflow-hidden max-h-[60vh]`, so any image whose layout height exceeded
+the cap was TALLER than the box, its excess clipped — while the zoom-1 pan lock
+(`panY` forced to exactly 0) made that excess permanently unreachable. The same
+failure mode existed horizontally. Zooming in did not help either, because the
+bounds still ignored the true content extent.
+
+**Fix (two parts).**
+
+1. *Correct clamp semantics* — `lib/flatten-core.ts`: `clampView` (and its
+   delegates `zoomAt` / `panBy`) now take the content's untransformed layout
+   size and bound the pan by
+   `minPan = Math.min(0, box − content · zoom)` per axis. The `Math.min(0, …)`
+   preserves the original "never drag a margin into view" guarantee when the
+   scaled content FITS the box, while an OVERFLOWING axis stays pannable —
+   including at zoom 1. Functions stay pure; `lib/flatten-core.ts` remains at
+   100% lines / 100% branches. `FlattenCanvas.tsx` measures the base canvas with
+   `offsetWidth/offsetHeight` (layout px — NOT `getBoundingClientRect`, which is
+   already multiplied by the CSS zoom) into a ref, refreshed by a `ResizeObserver`
+   (guarded for jsdom, where it is undefined) and re-run on image / Expand change;
+   a resize also re-clamps the live view so Expand can't strand a stale pan.
+2. *Default view shows the whole image* — both canvases now carry the viewport's
+   own height cap (`max-h-[60vh]` / `max-h-[85vh]` under Expand) alongside
+   `object-contain`, so the image is fitted in BOTH dimensions at zoom 1 and the
+   user zooms in for detail. Expand still only raises the cap. The overlay canvas
+   is sized by the identical rules (same intrinsic ratio, same containing block)
+   so the outlines stay registered with the pixels.
+
+**R24 click geometry is unaffected:** `resolvePixel` still maps pointer → image
+pixel via `mapClickToPixel` against the canvas's own `getBoundingClientRect()`,
+which reflects the CSS transform, so clicks land on the exact pixel at zoom 1,
+zoomed, panned, and Expanded.
+
+**No scope creep:** no schema, dependency, env, route or persistence change; the
+feature stays `done` in `feature_list.json`.
+
+### Tests for the fix
+
+| Requirement | Covering test |
+| --- | --- |
+| R23 (regression: bottom reachable) | flatten-core.test "clampView allows panning to the bottom of content taller than the box at zoom 1" — fails against the old formula (forced `panY` 0, now reaches `boxH − contentH`) |
+| R23 (regression: wider content) | flatten-core.test "clampView allows panning to the right edge of content wider than the box at zoom 1" |
+| R23 (no margin drag preserved) | flatten-core.test "clampView still forces the origin on an axis whose content is SMALLER than the box" (incl. the mixed per-axis and zoomed-past-the-box cases) |
+| R23 (focal invariance kept) | flatten-core.test "zoomAt scales toward the cursor…" + new "zoomAt keeps the focal point fixed on overflowing content" |
+| R23 (pan path end-to-end, pure) | flatten-core.test "panBy reaches the bottom of a tall image at zoom 1 (regression)" |
+| R23 (pan path, component) | FlattenWorkspace.test "pans at zoom 1 when the content overflows the viewport (regression)" — 400×900 content in a 100×100 box, middle-drag moves the transform to `translate(0px, -40px)` at `scale(1)` |
+| R23 (fit-to-viewport sizing) | FlattenWorkspace.test "fits the whole image in the viewport at zoom 1 and follows Expand" |
+| R24 (unregressed) | FlattenWorkspace.test "resolves clicks to the correct pixel under a zoomed canvas box" + the Space-drag suppression test, both still green |
+
+### Verification (bug fix)
+
+- `corepack pnpm typecheck` — clean.
+- `corepack pnpm lint` — 0 errors (only the 4 pre-existing `WeekPlanner.test.tsx`
+  warnings).
+- `corepack pnpm test` — **996 tests / 65 files, all passing** (was 989: +7 —
+  +5 core, +2 workspace).
+- Coverage: `lib/flatten-core.ts` **100% lines / 100% branches**;
+  `FlattenCanvas.tsx` 92.1% lines / 85.2% branches (≥ 80% target).
+- `pnpm build` NOT run (standing instruction); no production deploy.

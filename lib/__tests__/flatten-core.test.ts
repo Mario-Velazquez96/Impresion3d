@@ -627,35 +627,86 @@ describe("removeSmallRegions (R18, R19)", () => {
 
 describe("view math (R23)", () => {
   const BOX = 100;
+  // The common case the flatten canvas was built around: content that exactly
+  // fills the viewport at zoom 1.
+  const FILLS = [BOX, BOX] as const;
 
-  it("clampView zooms into range and forces the origin at zoom 1", () => {
-    expect(clampView({ zoom: 1, panX: 50, panY: 50 }, BOX, BOX)).toEqual({
+  it("clampView zooms into range and forces the origin when the content fits", () => {
+    expect(clampView({ zoom: 1, panX: 50, panY: 50 }, BOX, BOX, ...FILLS)).toEqual({
       zoom: 1,
       panX: 0,
       panY: 0,
     });
     // Below MIN clamps up to 1 (origin forced); above MAX clamps to 16.
-    expect(clampView({ zoom: 0.5, panX: 0, panY: 0 }, BOX, BOX).zoom).toBe(1);
-    expect(clampView({ zoom: 99, panX: 0, panY: 0 }, BOX, BOX).zoom).toBe(16);
+    expect(clampView({ zoom: 0.5, panX: 0, panY: 0 }, BOX, BOX, ...FILLS).zoom).toBe(1);
+    expect(clampView({ zoom: 99, panX: 0, panY: 0 }, BOX, BOX, ...FILLS).zoom).toBe(16);
   });
 
   it("clampView keeps the scaled content covering the viewport", () => {
-    // zoom 2 over a 100-box: pan is confined to [-100, 0] on each axis.
-    expect(clampView({ zoom: 2, panX: 50, panY: 50 }, BOX, BOX)).toEqual({
+    // zoom 2 over a 100-box of 100-content: pan is confined to [-100, 0].
+    expect(clampView({ zoom: 2, panX: 50, panY: 50 }, BOX, BOX, ...FILLS)).toEqual({
       zoom: 2,
       panX: 0,
       panY: 0,
     });
-    expect(clampView({ zoom: 2, panX: -500, panY: -500 }, BOX, BOX)).toEqual({
+    expect(clampView({ zoom: 2, panX: -500, panY: -500 }, BOX, BOX, ...FILLS)).toEqual({
       zoom: 2,
       panX: -100,
       panY: -100,
     });
   });
 
+  // Regression (bug: "can't move through the image / can't see the bottom").
+  // A tall image is clipped by the viewport at zoom 1; the pan bounds must come
+  // from the CONTENT, not the box, or the bottom is unreachable forever.
+  it("clampView allows panning to the bottom of content taller than the box at zoom 1", () => {
+    const view = { zoom: 1, panX: 0, panY: -900 };
+    // Content 400×900 in a 400-tall box: panY reaches boxH − contentH = −500.
+    expect(clampView(view, 400, 400, 400, 900)).toEqual({
+      zoom: 1,
+      panX: 0,
+      panY: -500,
+    });
+    // Any pan within the overflow is preserved verbatim (no snap back to 0).
+    expect(clampView({ zoom: 1, panX: 0, panY: -120 }, 400, 400, 400, 900).panY).toBe(
+      -120,
+    );
+  });
+
+  it("clampView allows panning to the right edge of content wider than the box at zoom 1", () => {
+    expect(clampView({ zoom: 1, panX: -999, panY: 0 }, 400, 400, 1000, 400)).toEqual({
+      zoom: 1,
+      panX: -600,
+      panY: 0,
+    });
+    expect(clampView({ zoom: 1, panX: -250, panY: 0 }, 400, 400, 1000, 400).panX).toBe(
+      -250,
+    );
+  });
+
+  it("clampView still forces the origin on an axis whose content is SMALLER than the box", () => {
+    // 200×80 content in a 400-box: neither axis overflows, so no margin drag —
+    // and the same holds per-axis when only one dimension overflows.
+    expect(clampView({ zoom: 1, panX: -50, panY: -50 }, 400, 400, 200, 80)).toEqual({
+      zoom: 1,
+      panX: 0,
+      panY: 0,
+    });
+    // Tall-but-narrow content: y pans, x stays pinned.
+    expect(clampView({ zoom: 1, panX: -50, panY: -50 }, 400, 400, 200, 900)).toEqual({
+      zoom: 1,
+      panX: 0,
+      panY: -50,
+    });
+    // Zooming a smaller-than-box content past the box makes its axis pannable.
+    expect(clampView({ zoom: 4, panX: -400, panY: 0 }, 400, 400, 200, 80).panX).toBe(
+      -400,
+    );
+  });
+
   it("zoomAt scales toward the cursor, keeping the focal content point fixed", () => {
     const focal = 50;
-    const zoomed = zoomAt(IDENTITY_VIEW, 1, focal, focal, BOX, BOX);
+    const zoomed = zoomAt(IDENTITY_VIEW, 1, focal, focal, BOX, BOX, ...FILLS);
     expect(zoomed.zoom).toBe(ZOOM_FACTOR);
     // Content point under the focal cursor is invariant across the zoom.
     const contentBefore = (focal - IDENTITY_VIEW.panX) / IDENTITY_VIEW.zoom;
@@ -663,30 +714,56 @@ describe("view math (R23)", () => {
     expect(contentAfter).toBeCloseTo(contentBefore, 6);
 
     // Zooming back out toward the same point returns to the identity view.
-    const out = zoomAt(zoomed, -1, focal, focal, BOX, BOX);
+    const out = zoomAt(zoomed, -1, focal, focal, BOX, BOX, ...FILLS);
     expect(out).toEqual(IDENTITY_VIEW);
+  });
+
+  it("zoomAt keeps the focal point fixed on overflowing content (no clamp interference)", () => {
+    // Tall content: the focal-point invariant must hold on BOTH axes, since
+    // the y pan is no longer clamped to 0 at low zoom.
+    const focalY = 300;
+    const start = { zoom: 1, panX: 0, panY: -200 };
+    const zoomed = zoomAt(start, 1, 50, focalY, 400, 400, 400, 900);
+    const before = (focalY - start.panY) / start.zoom;
+    const after = (focalY - zoomed.panY) / zoomed.zoom;
+    expect(after).toBeCloseTo(before, 6);
   });
 
   it("zoomAt clamps at both zoom limits", () => {
     // At MAX, a further zoom-in is a no-op on the zoom.
-    expect(zoomAt({ zoom: 16, panX: 0, panY: 0 }, 1, 50, 50, BOX, BOX).zoom).toBe(16);
+    expect(
+      zoomAt({ zoom: 16, panX: 0, panY: 0 }, 1, 50, 50, BOX, BOX, ...FILLS).zoom,
+    ).toBe(16);
     // At MIN, a zoom-out stays at the identity view.
-    expect(zoomAt(IDENTITY_VIEW, -1, 50, 50, BOX, BOX)).toEqual(IDENTITY_VIEW);
+    expect(zoomAt(IDENTITY_VIEW, -1, 50, 50, BOX, BOX, ...FILLS)).toEqual(IDENTITY_VIEW);
   });
 
   it("panBy moves the view and clamps to the covering bounds", () => {
     const base = { zoom: 2, panX: 0, panY: 0 };
-    expect(panBy(base, -30, -40, BOX, BOX)).toEqual({
+    expect(panBy(base, -30, -40, BOX, BOX, ...FILLS)).toEqual({
       zoom: 2,
       panX: -30,
       panY: -40,
     });
     // Panning past either bound clamps (top/left → 0; bottom/right → -100).
-    expect(panBy(base, 50, 50, BOX, BOX)).toEqual({ zoom: 2, panX: 0, panY: 0 });
-    expect(panBy(base, -300, -300, BOX, BOX)).toEqual({
+    expect(panBy(base, 50, 50, BOX, BOX, ...FILLS)).toEqual({
+      zoom: 2,
+      panX: 0,
+      panY: 0,
+    });
+    expect(panBy(base, -300, -300, BOX, BOX, ...FILLS)).toEqual({
       zoom: 2,
       panX: -100,
       panY: -100,
     });
+  });
+
+  it("panBy reaches the bottom of a tall image at zoom 1 (regression)", () => {
+    // The reported bug end-to-end through the pan path: drag up by 300 on a
+    // 900-tall image in a 400-tall box and the view actually moves.
+    const panned = panBy(IDENTITY_VIEW, 0, -300, 400, 400, 400, 900);
+    expect(panned).toEqual({ zoom: 1, panX: 0, panY: -300 });
+    // A further drag stops exactly at the image's bottom edge.
+    expect(panBy(panned, 0, -400, 400, 400, 400, 900).panY).toBe(-500);
   });
 });

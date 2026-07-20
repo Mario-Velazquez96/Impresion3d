@@ -182,13 +182,20 @@ export function buildFlattenOverlay(args: {
 
 // ---- view math (R23) -----------------------------------------------------
 export function zoomAt(view: ViewTransform, direction: 1 | -1, focalX: number, focalY: number,
-                       boxW: number, boxH: number): ViewTransform;
+                       boxW: number, boxH: number, contentW: number, contentH: number): ViewTransform;
 //   Multiply/divide zoom by ZOOM_FACTOR, clamp to [MIN_ZOOM, MAX_ZOOM], adjust pan so the content
 //   point under (focalX, focalY) stays put, then clamp the pan.
-export function panBy(view: ViewTransform, dx: number, dy: number, boxW: number, boxH: number): ViewTransform;
-export function clampView(view: ViewTransform, boxW: number, boxH: number): ViewTransform;
-//   Pan clamped so the scaled content always overlaps the viewport (cannot be dragged fully out);
-//   at zoom 1 pan is forced to (0, 0).
+export function panBy(view: ViewTransform, dx: number, dy: number,
+                      boxW: number, boxH: number, contentW: number, contentH: number): ViewTransform;
+export function clampView(view: ViewTransform, boxW: number, boxH: number,
+                          contentW: number, contentH: number): ViewTransform;
+//   Pan clamped so the scaled content never exposes a margin: 0 ≥ pan ≥ min(0, box − content · zoom),
+//   with the bounds taken from the CONTENT's untransformed layout size, NOT the viewport. An axis
+//   whose scaled content FITS the box is pinned to 0; an axis whose content OVERFLOWS stays pannable,
+//   including at zoom 1 (a tall image's clipped bottom must be reachable).
+//   [Corrected 2026-07-20 — see "Bug fixes" in progress/impl_12_flatten.md. The original design said
+//   "at zoom 1 pan is forced to (0, 0)", which assumed the content always exactly fills the box; it
+//   does not, and that assumption made the bottom of a tall image permanently unreachable.]
 export const IDENTITY_VIEW: ViewTransform; // { zoom: 1, panX: 0, panY: 0 }
 ```
 
@@ -300,7 +307,12 @@ parity holds.
   (`transform: translate(panX, panY) scale(zoom)`, origin top-left — the only
   dynamic inline style, allowed per conventions) holding the base canvas
   (painted from `current` via `paint`) and an overlay canvas (painted from
-  `buildFlattenOverlay`, `pointer-events-none`, `aria-hidden`). Wheel zoom is
+  `buildFlattenOverlay`, `pointer-events-none`, `aria-hidden`). Both canvases
+  carry the viewport's own height cap plus `object-contain`, so the WHOLE image
+  is fitted inside the box at zoom 1 (width-driven sizing alone let a tall image
+  overflow the clipped viewport). The base canvas's untransformed layout size
+  (`offsetWidth/Height`, re-measured by a `ResizeObserver` and on image/Expand
+  change) is what feeds the `clampView` pan bounds. Wheel zoom is
   attached via `ref` + `addEventListener("wheel", …, { passive: false })` so
   `preventDefault` works; middle-button and space+left drags call `panBy`.
   **Click/hover geometry (R24):** `getBoundingClientRect()` of the
