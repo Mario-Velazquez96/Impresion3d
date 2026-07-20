@@ -169,3 +169,111 @@ R6, R9, R17 → Phase B. R18, R19, R23, full R24-under-zoom → Phase C.
   `app/api/` route, no Storage code, no `.env.example` entry, no
   `package.json` change, no vitest/next config change;
   `lib/image-prep-core.ts` diff empty.
+
+## Phase B — smooth mode, catch strays, recolor every match (COMPLETE, 2026-07-20)
+
+All 4 Phase B tasks in `specs/12_flatten/tasks.md` are done and checked
+(R6, R9, R17). Phase C not started. `feature_list.json` unchanged; the feature
+stays `in_progress` pending review.
+
+### What was built
+
+**`lib/flatten-core.ts` (part 3)**
+- Constants: `DEFAULT_SMOOTH_TOLERANCE` 10, `STRAY_MAX_ISLAND_PX` 16,
+  `STRAY_MARGIN_PX` 8. Updated the header + `MaskMode` doc comment (smooth is
+  now a shipped builder, not a Phase-B stub).
+- `smoothMask` (R6) — the same deterministic FIFO 4-connected BFS and fixed
+  neighbor order as `floodMask`, but the inclusion test compares each neighbor
+  against the CURRENT pixel (local chaining) instead of the seed, so gradients
+  drift far from the seed color are captured.
+- `addStrayIslands` (R9) — new mask = mask ∪ every 4-connected component of
+  seed-color-matching, non-mask pixels that is fully inside the mask bbox
+  dilated by `STRAY_MARGIN_PX` (clipped) and whose area ≤ `STRAY_MAX_ISLAND_PX`.
+  Row-major component discovery, FIFO BFS; empty input mask returned unchanged;
+  input mask never mutated (works on a `.slice()` copy).
+- `recolorExact` (R17) — new buffer; every pixel EXACTLY equal to `from` (RGB,
+  alpha ignored) recolored to `to`; near-miss on any channel untouched; input
+  never mutated.
+
+**`components/image-prep/image-prep.worker.ts`** — still logic-free dispatch:
+`mask` now picks `smoothMask` for `mode: "smooth"` and applies `addStrayIslands`
+when `catchStrays` (seed color via `colorAtPixel`); `flatten`/`recolor` →
+`recolorExact`. `removeSmall` still throws the clear "not available yet" error
+over the existing `{ ok: false }` path until Phase C. Transfer lists unchanged.
+
+**`components/image-prep/FlattenControls.tsx`** — added the **Smooth** radio
+(Flood / Smooth / Brush) and the "Catch stray pixels" checkbox rendered for
+flood/smooth only (`mode !== "brush"`), wired via new `catchStrays` /
+`onCatchStraysChange` props.
+
+**`components/image-prep/FlattenFillPanel.tsx`** — added **Recolor every match**
+(disabled while `busy` or when the chosen hex equals the suggested hex), wired
+via a new `onRecolor` prop.
+
+**`components/image-prep/FlattenWorkspace.tsx`** — separate `floodTolerance` and
+`smoothTolerance` state (each with its own default; the active `tolerance` is
+derived by mode), a `catchStrays` state, `stepSize` now steps the active mode's
+size (brush radius / flood tolerance / smooth tolerance), the hover request
+carries the real `catchStrays` and re-issues when strays/smooth-tolerance
+change, and a `recolorEveryMatch` handler that posts `recolor(from: suggested,
+to: chosen)`, reports up via `onMutated(pixels, 0)` (counter unchanged), and
+lets the `[current]` effect clear the selection.
+
+**Tests**
+- `lib/__tests__/flatten-core.test.ts` — +10 tests (Phase B constants,
+  `smoothMask` gradient-vs-flood / step boundary / uniform-region+clamp /
+  determinism, `addStrayIslands` absorb / size-cap / margin-bbox / no-op+empty,
+  `recolorExact` exact-only+unmutated). `lib/flatten-core.ts` stays **100%
+  branch / 100% lines**.
+- `components/image-prep/__tests__/FlattenWorkspace.test.tsx` — fake worker
+  extended to smooth/catch-strays/recolor; +3 tests (smooth mode with its own
+  W/S-stepped tolerance independent of flood; catch-strays checkbox flood/smooth
+  only + value rides the mask request; Recolor every match disabled at suggested
+  / enabled after choosing / swaps a match OUTSIDE the selection / clears
+  selection / undoable / counter unchanged).
+
+### Decisions & deviations (design.md vs. code)
+
+- **Two tolerance states, not one** (design implies "own tolerance state" for
+  smooth): the workspace keeps independent `floodTolerance` (24) and
+  `smoothTolerance` (10); switching modes preserves each, and W/S steps only the
+  active one. The `FlattenControls` `tolerance` prop receives the active value.
+- **`smoothMask` visited-on-first-touch**: like `floodMask`, a pixel is marked
+  visited when first examined, so the reachable set is determined by BFS order
+  (local chaining). Matches design's "local chaining" description and is
+  deterministic; pinned by a determinism test.
+- **`addStrayIslands` also absorbs matching pixels touching the region**: the
+  design's precise algorithm is "components of non-mask matching pixels disjoint
+  from the mask" — a matching pixel adjacent to the mask forms its own such
+  component and is absorbed (this is why the BFS `mask`-neighbor branch exists).
+  For real flood masks this never arises (flood is maximal); it can for smooth
+  masks. Covered by the rich 6×1 absorb test.
+- **`recolorExact` ignores alpha** (RGB-exact match, alpha preserved) — same
+  conservative pure-function contract as `applyFillToMask`; pinned by a test.
+
+### Requirements satisfied in Phase B (test traceability)
+
+| R | Test |
+|---|---|
+| R6 | flatten-core.test `smoothMask` suite (gradient-vs-flood, step boundary, uniform+clamp, determinism); FlattenWorkspace.test "smooth mode … own W/S-stepped tolerance" (asserts `mode: "smooth"` on the mask request) |
+| R9 | flatten-core.test `addStrayIslands` suite (absorb, size-cap, margin-bbox, no-op/empty, unmutated); FlattenWorkspace.test "catch stray pixels … rides its value on the mask request" |
+| R17 | flatten-core.test `recolorExact` suite; FlattenWorkspace.test "recolor every match … swaps every match" (from/to on the `recolor` request, OUTSIDE-selection pixel changes, counter unchanged, undoable) |
+
+### Final check results (Phase B gate)
+
+- `corepack pnpm typecheck` — clean (0 errors).
+- `corepack pnpm lint` — 0 errors; only the 4 pre-existing warnings in
+  `components/planning/__tests__/WeekPlanner.test.tsx` (untouched).
+- `corepack pnpm test` — **967 tests / 65 files, all passing** (was 954: +13
+  tests). The one `act(...)` stderr warning is in a pre-existing Phase-A test
+  ("W/S sizing"), not Phase-B code.
+- Coverage: `lib/flatten-core.ts` **100% branch / 100% lines**. Changed
+  modules: `worker-messages.ts` 100%, `FlattenControls` 100%,
+  `FlattenFillPanel` 100%, `FlattenCanvas` 96.2%, `FlattenWorkspace` 95.2%
+  lines, `ImagePrep.tsx` 94.1% lines — all ≥ 80%. `image-prep.worker.ts` keeps
+  its pre-existing coverage exclusion (no config change).
+- `pnpm build` NOT run (standing instruction).
+- E2E NOT executed (credential-gated; the E2E extension lives in close-out).
+- R28 spot-check: no schema/migration, no `actions/`, no `app/api/` route, no
+  Storage code, no `.env.example` entry, no `package.json` dependency, no
+  config change; `lib/image-prep-core.ts` untouched.

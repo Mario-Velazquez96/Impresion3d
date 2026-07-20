@@ -3,17 +3,20 @@
 import type { MaskMode } from "@/lib/flatten-core";
 
 /**
- * Flatten tool controls (12_flatten: R8, R20, R21, R22, R26): mask-mode radio
- * group (Flood / Brush in Phase A; Smooth arrives in Phase B), the current
- * tolerance-or-radius readout with the W/S caption, Undo, Reset all, and the
- * regions-flattened counter. Every mutation control is disabled while the
- * worker is busy; presets and Despeckle arrive in Phase C.
+ * Flatten tool controls (12_flatten: R8, R9, R20, R21, R22, R26): mask-mode
+ * radio group (Flood / Smooth / Brush), the current tolerance-or-radius
+ * readout with the W/S caption, the catch-stray-pixels checkbox (flood/smooth
+ * only, R9), Undo, Reset all, and the regions-flattened counter. Every
+ * mutation control is disabled while the worker is busy; presets and Despeckle
+ * arrive in Phase C.
  */
 export function FlattenControls({
   mode,
   onModeChange,
   tolerance,
   brushRadius,
+  catchStrays,
+  onCatchStraysChange,
   busy,
   canUndo,
   onUndo,
@@ -22,10 +25,13 @@ export function FlattenControls({
 }: {
   mode: MaskMode;
   onModeChange: (mode: MaskMode) => void;
-  /** Current flood tolerance (redmean units) (R5, R8). */
+  /** Current flood/smooth tolerance (redmean units) (R5, R6, R8). */
   tolerance: number;
   /** Current brush radius in pixels (R7, R8). */
   brushRadius: number;
+  /** Whether the flood/smooth mask also captures nearby strays (R9). */
+  catchStrays: boolean;
+  onCatchStraysChange: (value: boolean) => void;
   busy: boolean;
   /** Whether a prior flatten state exists to revert to (R20). */
   canUndo: boolean;
@@ -55,6 +61,15 @@ export function FlattenControls({
             <input
               type="radio"
               name="flatten-mode"
+              checked={mode === "smooth"}
+              onChange={() => onModeChange("smooth")}
+            />
+            Smooth
+          </label>
+          <label className="flex items-center gap-1 text-xs">
+            <input
+              type="radio"
+              name="flatten-mode"
               checked={mode === "brush"}
               onChange={() => onModeChange("brush")}
             />
@@ -71,6 +86,17 @@ export function FlattenControls({
         </p>
         <p className="text-xs text-muted-foreground">W grow · S shrink</p>
       </div>
+
+      {mode !== "brush" ? (
+        <label className="flex items-center gap-2 text-xs">
+          <input
+            type="checkbox"
+            checked={catchStrays}
+            onChange={(event) => onCatchStraysChange(event.target.checked)}
+          />
+          Catch stray pixels
+        </label>
+      ) : null}
 
       <div className="flex flex-wrap gap-2">
         <button

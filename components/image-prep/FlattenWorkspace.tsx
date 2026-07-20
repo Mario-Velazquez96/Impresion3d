@@ -10,6 +10,7 @@ import {
   BRUSH_RADIUS_STEP,
   DEFAULT_BRUSH_RADIUS,
   DEFAULT_FLOOD_TOLERANCE,
+  DEFAULT_SMOOTH_TOLERANCE,
   MAX_BRUSH_RADIUS,
   MAX_TOLERANCE,
   MIN_BRUSH_RADIUS,
@@ -102,8 +103,14 @@ export function FlattenWorkspace({
   onResetAll: () => void;
 }) {
   const [mode, setMode] = useState<MaskMode>("flood");
-  const [tolerance, setTolerance] = useState(DEFAULT_FLOOD_TOLERANCE);
+  const [floodTolerance, setFloodTolerance] = useState(DEFAULT_FLOOD_TOLERANCE);
+  const [smoothTolerance, setSmoothTolerance] = useState(
+    DEFAULT_SMOOTH_TOLERANCE,
+  );
   const [brushRadius, setBrushRadius] = useState(DEFAULT_BRUSH_RADIUS);
+  const [catchStrays, setCatchStrays] = useState(false);
+  // The tolerance the active (non-brush) mode uses; brush uses brushRadius.
+  const tolerance = mode === "smooth" ? smoothTolerance : floodTolerance;
   const [regions, setRegions] = useState<SelectedRegion[]>([]);
   const [hover, setHover] = useState<Mask | null>(null);
   const [hoverSeed, setHoverSeed] = useState<{ x: number; y: number } | null>(
@@ -188,7 +195,7 @@ export function FlattenWorkspace({
         seedY: hoverSeed.y,
         mode,
         tolerance,
-        catchStrays: false,
+        catchStrays,
       },
       { background: true },
     )
@@ -211,7 +218,17 @@ export function FlattenWorkspace({
     return () => {
       stale = true;
     };
-  }, [hoverSeed, pickMode, busy, mode, brushRadius, tolerance, current, request]);
+  }, [
+    hoverSeed,
+    pickMode,
+    busy,
+    mode,
+    brushRadius,
+    tolerance,
+    catchStrays,
+    current,
+    request,
+  ]);
 
   const handleHoverPixel = useCallback(
     (pixel: { x: number; y: number } | null) => {
@@ -294,6 +311,36 @@ export function FlattenWorkspace({
     }
   }, [busy, regions.length, chosenFill, current, combined, request, onMutated]);
 
+  // Recolor every match (R17): replace every pixel image-wide EXACTLY equal to
+  // the suggested color with the chosen fill in the worker; the island replaces
+  // the image, pushes the undo history, and leaves the counter unchanged (0
+  // regions collapsed). The [current] effect then clears the selection.
+  const recolorEveryMatch = useCallback(async () => {
+    if (busy || suggested === null || chosenFill === null) {
+      return;
+    }
+    try {
+      const result = await request({
+        op: "flatten",
+        buffer: copyPixels(current),
+        width: current.width,
+        height: current.height,
+        action: { kind: "recolor", from: suggested.color, to: chosenFill },
+      });
+      setError(null);
+      onMutated(
+        {
+          width: result.pixels.width,
+          height: result.pixels.height,
+          data: new Uint8ClampedArray(result.pixels.buffer),
+        },
+        0,
+      );
+    } catch {
+      setError("Recoloring every match failed — try again.");
+    }
+  }, [busy, suggested, chosenFill, current, request, onMutated]);
+
   // Live hex validation (R14): valid values become the chosen fill; invalid
   // non-empty values show the inline error and change nothing.
   const handleHexChange = useCallback((value: string) => {
@@ -311,7 +358,8 @@ export function FlattenWorkspace({
     setFillOverride(parsed);
   }, []);
 
-  // W/S size stepping, clamped to the exported ranges (R8).
+  // W/S size stepping, clamped to the exported ranges — steps the ACTIVE
+  // mode's size: brush radius, flood tolerance, or smooth tolerance (R8).
   const stepSize = useCallback(
     (direction: 1 | -1) => {
       if (mode === "brush") {
@@ -321,13 +369,17 @@ export function FlattenWorkspace({
             Math.max(MIN_BRUSH_RADIUS, radius + direction * BRUSH_RADIUS_STEP),
           ),
         );
-      } else {
-        setTolerance((value) =>
-          Math.min(
-            MAX_TOLERANCE,
-            Math.max(MIN_TOLERANCE, value + direction * TOLERANCE_STEP),
-          ),
+        return;
+      }
+      const clampTolerance = (value: number) =>
+        Math.min(
+          MAX_TOLERANCE,
+          Math.max(MIN_TOLERANCE, value + direction * TOLERANCE_STEP),
         );
+      if (mode === "smooth") {
+        setSmoothTolerance(clampTolerance);
+      } else {
+        setFloodTolerance(clampTolerance);
       }
     },
     [mode],
@@ -413,6 +465,8 @@ export function FlattenWorkspace({
           onModeChange={setMode}
           tolerance={tolerance}
           brushRadius={brushRadius}
+          catchStrays={catchStrays}
+          onCatchStraysChange={setCatchStrays}
           busy={busy}
           canUndo={canUndo}
           onUndo={onUndo}
@@ -433,6 +487,7 @@ export function FlattenWorkspace({
             onTogglePickMode={() => setPickMode((on) => !on)}
             onFlatten={() => void flattenSelection()}
             onClear={clearSelection}
+            onRecolor={() => void recolorEveryMatch()}
             busy={busy}
           />
         ) : null}

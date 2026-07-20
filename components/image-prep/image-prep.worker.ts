@@ -7,9 +7,10 @@
  * `{ ok: false, error }`.
  *
  * 12_flatten extends the dispatch with the `mask` and `flatten` ops backed by
- * `lib/flatten-core.ts` (R4, R5, R16, R26). Actions from later phases
- * (smooth/catch-strays, recolor, removeSmall) throw a clear error that rides
- * the same `{ ok: false }` path until their phase lands.
+ * `lib/flatten-core.ts` (R4–R6, R9, R16, R17, R26). Phase A shipped flood masks
+ * and `fill`; Phase B adds smooth masks, catch-strays, and `recolor`. The
+ * `removeSmall` action throws a clear error over the same `{ ok: false }` path
+ * until Phase C lands.
  */
 
 import {
@@ -26,9 +27,13 @@ import {
   type PixelBuffer,
 } from "@/lib/image-prep-core";
 import {
+  addStrayIslands,
   applyFillToMask,
+  colorAtPixel,
   floodMask,
   maskPixelCount,
+  recolorExact,
+  smoothMask,
   type Mask,
 } from "@/lib/flatten-core";
 import {
@@ -141,13 +146,18 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
           height: req.height,
           data: new Uint8ClampedArray(req.buffer),
         };
-        if (req.mode !== "flood") {
-          throw new Error("Smooth masks are not available yet");
-        }
-        if (req.catchStrays) {
-          throw new Error("Catch stray pixels is not available yet");
-        }
-        const mask = floodMask(src, req.seedX, req.seedY, req.tolerance);
+        const base =
+          req.mode === "smooth"
+            ? smoothMask(src, req.seedX, req.seedY, req.tolerance)
+            : floodMask(src, req.seedX, req.seedY, req.tolerance);
+        const mask = req.catchStrays
+          ? addStrayIslands(
+              src,
+              base,
+              colorAtPixel(src, req.seedX, req.seedY),
+              req.tolerance,
+            )
+          : base;
         const buffer = mask.data.buffer as ArrayBuffer;
         scope.postMessage(
           {
@@ -166,17 +176,23 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
           height: req.height,
           data: new Uint8ClampedArray(req.buffer),
         };
-        if (req.action.kind !== "fill") {
+        if (req.action.kind === "removeSmall") {
           throw new Error(
             `The "${req.action.kind}" flatten action is not available yet`,
           );
         }
-        const mask: Mask = {
-          width: req.width,
-          height: req.height,
-          data: new Uint8Array(req.action.mask),
-        };
-        const pixels = toPayload(applyFillToMask(src, mask, req.action.fill));
+        let result: PixelBuffer;
+        if (req.action.kind === "recolor") {
+          result = recolorExact(src, req.action.from, req.action.to);
+        } else {
+          const mask: Mask = {
+            width: req.width,
+            height: req.height,
+            data: new Uint8Array(req.action.mask),
+          };
+          result = applyFillToMask(src, mask, req.action.fill);
+        }
+        const pixels = toPayload(result);
         scope.postMessage(
           { id: req.id, ok: true, op: "flatten", result: { pixels } },
           [pixels.buffer],

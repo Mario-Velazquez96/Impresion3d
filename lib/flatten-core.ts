@@ -14,8 +14,9 @@
  *
  * Phase A ships the flood/brush mask builders, mask set operations, selection
  * statistics, fill application, and the canvas overlay builder (R5, R7,
- * R10–R16). Smooth masks, stray capture, recolor, remove-small-regions, and
- * view math land in Phases B and C.
+ * R10–R16). Phase B adds the smooth mask builder, stray-island capture, and
+ * exact-color recolor (R6, R9, R17). Remove-small-regions and view math land
+ * in Phase C.
  */
 
 import {
@@ -30,11 +31,7 @@ import {
 /** Binary mask over an image; `data[y * width + x]` is 0 | 1. */
 export type Mask = { width: number; height: number; data: Uint8Array };
 
-/**
- * The three hover-mask tools (R5–R7). "smooth" is part of the wire protocol
- * from Phase A but its builder ships in Phase B; the Phase-A UI offers only
- * flood and brush.
- */
+/** The three hover-mask tools: flood (R5), smooth (R6), brush (R7). */
 export type MaskMode = "flood" | "smooth" | "brush";
 
 /** One exact color and how many masked pixels carry it (R13). */
@@ -44,10 +41,21 @@ export type ColorCount = { color: Rgb; count: number };
 
 /** Default flood tolerance, in redmean `colorDistance` units (R5). */
 export const DEFAULT_FLOOD_TOLERANCE = 24;
+/**
+ * Default smooth tolerance (R6). Smooth compares NEIGHBORING pixels rather
+ * than every pixel against the seed, so a smaller per-step value still chains
+ * across a wide gradient — hence a lower default than flood.
+ */
+export const DEFAULT_SMOOTH_TOLERANCE = 10;
 export const MIN_TOLERANCE = 0;
 export const MAX_TOLERANCE = 150;
 /** W/S tolerance step for flood/smooth (R8). */
 export const TOLERANCE_STEP = 4;
+
+/** Largest disconnected island the catch-strays option will absorb (R9). */
+export const STRAY_MAX_ISLAND_PX = 16;
+/** How far outside the main region's bbox a stray island may sit (R9). */
+export const STRAY_MARGIN_PX = 8;
 
 export const DEFAULT_BRUSH_RADIUS = 8;
 export const MIN_BRUSH_RADIUS = 1;
@@ -153,6 +161,79 @@ export function floodMask(
 }
 
 /**
+ * Smooth mask (R6): the 4-connected region reachable from the seed by steps
+ * whose redmean distance BETWEEN NEIGHBORING pixels is ≤ `tolerance` (local
+ * chaining), so gradients and skies that drift far from the seed color are
+ * still captured. Same deterministic FIFO BFS and fixed neighbor order as
+ * `floodMask`; the difference is purely the inclusion test (neighbor-vs-current
+ * instead of neighbor-vs-seed).
+ */
+export function smoothMask(
+  src: PixelBuffer,
+  seedX: number,
+  seedY: number,
+  tolerance: number,
+): Mask {
+  const { width, height, data } = src;
+  const sx = Math.min(width - 1, Math.max(0, Math.floor(seedX)));
+  const sy = Math.min(height - 1, Math.max(0, Math.floor(seedY)));
+  const tol = Math.max(0, tolerance);
+
+  const mask = new Uint8Array(width * height);
+  const visited = new Uint8Array(width * height);
+  const queue = new Int32Array(width * height);
+  let head = 0;
+  let tail = 0;
+
+  const start = sy * width + sx;
+  visited[start] = 1;
+  mask[start] = 1;
+  queue[tail++] = start;
+
+  const lastRowStart = width * (height - 1);
+  while (head < tail) {
+    const index = queue[head++];
+    const currentOffset = index * 4;
+    const current = {
+      r: data[currentOffset],
+      g: data[currentOffset + 1],
+      b: data[currentOffset + 2],
+    };
+    const tryPixel = (neighbor: number) => {
+      if (visited[neighbor] === 1) {
+        return;
+      }
+      visited[neighbor] = 1;
+      const offset = neighbor * 4;
+      const color = {
+        r: data[offset],
+        g: data[offset + 1],
+        b: data[offset + 2],
+      };
+      if (colorDistance(color, current) <= tol) {
+        mask[neighbor] = 1;
+        queue[tail++] = neighbor;
+      }
+    };
+    const x = index % width;
+    if (x > 0) {
+      tryPixel(index - 1);
+    }
+    if (x < width - 1) {
+      tryPixel(index + 1);
+    }
+    if (index >= width) {
+      tryPixel(index - width);
+    }
+    if (index < lastRowStart) {
+      tryPixel(index + width);
+    }
+  }
+
+  return { width, height, data: mask };
+}
+
+/**
  * Brush mask (R7): the filled circle `dx² + dy² ≤ r²` centered on the cursor,
  * clipped to the image bounds; the radius is clamped to
  * [MIN_BRUSH_RADIUS, MAX_BRUSH_RADIUS].
@@ -186,6 +267,132 @@ export function brushMask(
     }
   }
   return { width, height, data: mask };
+}
+
+/**
+ * Catch-stray-islands expansion (R9): given a hover `mask` and the seed color,
+ * return a NEW mask that also includes every 4-connected component of
+ * seed-color-matching pixels (redmean distance ≤ `tolerance`) that is disjoint
+ * from `mask`, has an area ≤ `STRAY_MAX_ISLAND_PX`, and lies fully inside
+ * `mask`'s bounding box expanded by `STRAY_MARGIN_PX` on each side (clipped to
+ * the image). Component discovery is row-major and BFS is FIFO with the fixed
+ * neighbor order, so the result is deterministic. An empty input mask (nothing
+ * to expand around) is returned unchanged; the input mask is never mutated.
+ */
+export function addStrayIslands(
+  src: PixelBuffer,
+  mask: Mask,
+  seedColor: Rgb,
+  tolerance: number,
+): Mask {
+  const { width, height } = mask;
+  const { data } = src;
+  const tol = Math.max(0, tolerance);
+  const out = mask.data.slice();
+
+  // Bounding box of the main region (Math.min/max — no branching).
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (mask.data[y * width + x] === 1) {
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+      }
+    }
+  }
+  if (maxX < 0) {
+    return { width, height, data: out }; // empty mask — nothing to expand around
+  }
+  const bx0 = Math.max(0, minX - STRAY_MARGIN_PX);
+  const by0 = Math.max(0, minY - STRAY_MARGIN_PX);
+  const bx1 = Math.min(width - 1, maxX + STRAY_MARGIN_PX);
+  const by1 = Math.min(height - 1, maxY + STRAY_MARGIN_PX);
+
+  const matches = (index: number): boolean => {
+    const offset = index * 4;
+    const color = {
+      r: data[offset],
+      g: data[offset + 1],
+      b: data[offset + 2],
+    };
+    return colorDistance(color, seedColor) <= tol;
+  };
+
+  const visited = new Uint8Array(width * height);
+  const queue = new Int32Array(width * height);
+  const lastRowStart = width * (height - 1);
+
+  for (let sy = 0; sy < height; sy++) {
+    for (let sx = 0; sx < width; sx++) {
+      const startIndex = sy * width + sx;
+      if (
+        visited[startIndex] === 1 ||
+        mask.data[startIndex] === 1 ||
+        !matches(startIndex)
+      ) {
+        visited[startIndex] = 1;
+        continue;
+      }
+      // BFS this component of matching, non-mask pixels; track its extent.
+      let head = 0;
+      let tail = 0;
+      visited[startIndex] = 1;
+      queue[tail++] = startIndex;
+      const component: number[] = [];
+      let cMinX = width;
+      let cMinY = height;
+      let cMaxX = -1;
+      let cMaxY = -1;
+      while (head < tail) {
+        const index = queue[head++];
+        component.push(index);
+        const x = index % width;
+        const y = (index - x) / width;
+        cMinX = Math.min(cMinX, x);
+        cMaxX = Math.max(cMaxX, x);
+        cMinY = Math.min(cMinY, y);
+        cMaxY = Math.max(cMaxY, y);
+        const tryPixel = (neighbor: number) => {
+          if (
+            visited[neighbor] === 1 ||
+            mask.data[neighbor] === 1 ||
+            !matches(neighbor)
+          ) {
+            visited[neighbor] = 1;
+            return;
+          }
+          visited[neighbor] = 1;
+          queue[tail++] = neighbor;
+        };
+        if (x > 0) {
+          tryPixel(index - 1);
+        }
+        if (x < width - 1) {
+          tryPixel(index + 1);
+        }
+        if (index >= width) {
+          tryPixel(index - width);
+        }
+        if (index < lastRowStart) {
+          tryPixel(index + width);
+        }
+      }
+      const insideBox =
+        cMinX >= bx0 && cMaxX <= bx1 && cMinY >= by0 && cMaxY <= by1;
+      if (insideBox && component.length <= STRAY_MAX_ISLAND_PX) {
+        for (const index of component) {
+          out[index] = 1;
+        }
+      }
+    }
+  }
+
+  return { width, height, data: out };
 }
 
 // ---- mask set operations (R10–R12) ------------------------------------------
@@ -331,6 +538,29 @@ export function applyFillToMask(
     data[offset] = fill.r;
     data[offset + 1] = fill.g;
     data[offset + 2] = fill.b;
+  }
+  return { width: src.width, height: src.height, data };
+}
+
+/**
+ * Recolor every match (R17): return a NEW buffer with every pixel EXACTLY
+ * equal to `from` (RGB, alpha ignored) recolored to `to`; a near-miss on any
+ * channel is left untouched. The input buffer is never mutated.
+ */
+export function recolorExact(src: PixelBuffer, from: Rgb, to: Rgb): PixelBuffer {
+  const data = src.data.slice();
+  const total = src.width * src.height;
+  for (let i = 0; i < total; i++) {
+    const offset = i * 4;
+    if (
+      data[offset] === from.r &&
+      data[offset + 1] === from.g &&
+      data[offset + 2] === from.b
+    ) {
+      data[offset] = to.r;
+      data[offset + 1] = to.g;
+      data[offset + 2] = to.b;
+    }
   }
   return { width: src.width, height: src.height, data };
 }

@@ -8,9 +8,11 @@ import { rgbToHex, type Rgb } from "@/lib/image-prep-core";
  * the selection is non-empty: the "N px selected" count, the suggested fill
  * (most-common exact color with hex + % of the selection) and up to
  * `MAX_RUNNER_UPS` runner-up swatches, a hex input with an inline error on
- * invalid values, the eyedropper **Pick** toggle, **Flatten selection**, and
- * **Clear**. The chosen fill lives in the workspace so it can reset to the
- * suggested color whenever the selection changes (R13).
+ * invalid values, the eyedropper **Pick** toggle, **Flatten selection**,
+ * **Clear**, and **Recolor every match** (R17, enabled only when the chosen
+ * fill differs from the suggested color). The chosen fill lives in the
+ * workspace so it can reset to the suggested color whenever the selection
+ * changes (R13).
  */
 export function FlattenFillPanel({
   selectedPx,
@@ -24,6 +26,7 @@ export function FlattenFillPanel({
   onTogglePickMode,
   onFlatten,
   onClear,
+  onRecolor,
   busy,
 }: {
   /** Union size of the selection in pixels (R10). */
@@ -43,6 +46,8 @@ export function FlattenFillPanel({
   onFlatten: () => void;
   /** Empty the selection without changing the image (R12). */
   onClear: () => void;
+  /** Swap the suggested color for the chosen fill image-wide (R17). */
+  onRecolor: () => void;
   busy: boolean;
 }) {
   const suggested = stats[0];
@@ -50,6 +55,9 @@ export function FlattenFillPanel({
   const suggestedHex = rgbToHex(suggested.color);
   const suggestedPercent = ((suggested.count / selectedPx) * 100).toFixed(1);
   const chosenHex = rgbToHex(chosenFill);
+  // Recolor is a no-op when the fill equals the suggested color, so it is only
+  // offered once the user has chosen a different fill (R17).
+  const canRecolor = chosenHex !== suggestedHex;
 
   const swatchButton = (color: Rgb, label: string, extra?: string) => {
     const hex = rgbToHex(color);
@@ -159,6 +167,14 @@ export function FlattenFillPanel({
           className="h-9 rounded-md border px-3 text-sm hover:bg-accent disabled:opacity-50"
         >
           Clear
+        </button>
+        <button
+          type="button"
+          disabled={busy || !canRecolor}
+          onClick={onRecolor}
+          className="h-9 rounded-md border px-3 text-sm hover:bg-accent disabled:opacity-50"
+        >
+          Recolor every match
         </button>
       </div>
     </section>

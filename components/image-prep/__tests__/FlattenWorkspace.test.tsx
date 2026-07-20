@@ -27,9 +27,13 @@ import type {
   WorkerRequestBody,
 } from "@/components/image-prep/worker-messages";
 import {
+  addStrayIslands,
   applyFillToMask,
+  colorAtPixel,
   floodMask,
   maskPixelCount,
+  recolorExact,
+  smoothMask,
 } from "@/lib/flatten-core";
 import type { PixelBuffer, Rgb } from "@/lib/image-prep-core";
 
@@ -78,7 +82,7 @@ function decodedSample(): DecodedImage {
   };
 }
 
-/** Core-backed fake for the Phase-A ops the workspace uses (mask + flatten). */
+/** Core-backed fake mirroring the worker for the ops the workspace uses. */
 async function fakeRequest(
   body: WorkerRequestBody,
 ): Promise<MaskResult | FlattenResult> {
@@ -88,36 +92,54 @@ async function fakeRequest(
       height: body.height,
       data: new Uint8ClampedArray(body.buffer),
     };
-    const mask = floodMask(src, body.seedX, body.seedY, body.tolerance);
+    const base =
+      body.mode === "smooth"
+        ? smoothMask(src, body.seedX, body.seedY, body.tolerance)
+        : floodMask(src, body.seedX, body.seedY, body.tolerance);
+    const mask = body.catchStrays
+      ? addStrayIslands(
+          src,
+          base,
+          colorAtPixel(src, body.seedX, body.seedY),
+          body.tolerance,
+        )
+      : base;
     return {
       mask: mask.data.buffer as ArrayBuffer,
       count: maskPixelCount(mask),
     };
   }
-  if (body.op === "flatten" && body.action.kind === "fill") {
+  if (body.op === "flatten") {
     const src: PixelBuffer = {
       width: body.width,
       height: body.height,
       data: new Uint8ClampedArray(body.buffer),
     };
-    const filled = applyFillToMask(
-      src,
-      {
-        width: body.width,
-        height: body.height,
-        data: new Uint8Array(body.action.mask),
-      },
-      body.action.fill,
-    );
+    let out: PixelBuffer;
+    if (body.action.kind === "recolor") {
+      out = recolorExact(src, body.action.from, body.action.to);
+    } else if (body.action.kind === "fill") {
+      out = applyFillToMask(
+        src,
+        {
+          width: body.width,
+          height: body.height,
+          data: new Uint8Array(body.action.mask),
+        },
+        body.action.fill,
+      );
+    } else {
+      throw new Error(`Unexpected flatten action: ${body.action.kind}`);
+    }
     return {
       pixels: {
-        width: filled.width,
-        height: filled.height,
-        buffer: filled.data.buffer as ArrayBuffer,
+        width: out.width,
+        height: out.height,
+        buffer: out.data.buffer as ArrayBuffer,
       },
     };
   }
-  throw new Error(`Unexpected op in Phase-A workspace tests: ${body.op}`);
+  throw new Error(`Unexpected op in workspace tests: ${body.op}`);
 }
 
 beforeEach(() => {
@@ -629,5 +651,153 @@ describe("workspace chrome (R25, R26)", () => {
     // Nothing changed: counter still 0 and the selection survives.
     expect(counter(0)).toBeInTheDocument();
     expect(screen.getByText("4 px selected")).toBeInTheDocument();
+  });
+});
+
+// ---- Phase B (R6, R9, R17) --------------------------------------------------
+
+const catchStraysBox = () =>
+  screen.queryByRole("checkbox", { name: "Catch stray pixels" });
+
+/** The last `mask` request body (hover calls carry the mode/strays settings). */
+function lastMaskBody(): WorkerRequestBody | undefined {
+  const calls = mocks.requestSpy.mock.calls.filter(
+    (call: unknown[]) => (call[0] as WorkerRequestBody).op === "mask",
+  );
+  return calls[calls.length - 1]?.[0] as WorkerRequestBody | undefined;
+}
+
+describe("smooth mode (R6, R8)", () => {
+  it("is selectable with its own W/S-stepped tolerance, independent of flood", async () => {
+    render(<ImagePrep catalogColors={[]} />);
+    const canvas = await enterFlatten();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Smooth" }));
+    // Smooth starts at its own default (10), independent of the flood 24.
+    expect(screen.getByText("Tolerance: 10")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "w" });
+    expect(screen.getByText("Tolerance: 14")).toBeInTheDocument();
+
+    // The hover recomputes with mode "smooth" and the smooth tolerance (R4).
+    await hover(canvas, 0.5, 0.5);
+    expect(lastMaskBody()).toEqual(
+      expect.objectContaining({ op: "mask", mode: "smooth", tolerance: 14 }),
+    );
+
+    // Flood keeps its own 24; switching back to smooth restores the stepped 14.
+    fireEvent.click(screen.getByRole("radio", { name: "Flood" }));
+    expect(screen.getByText("Tolerance: 24")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "Smooth" }));
+    expect(screen.getByText("Tolerance: 14")).toBeInTheDocument();
+    await act(async () => {}); // flush the hover re-issue from the mode switches
+  });
+});
+
+describe("catch stray pixels (R9)", () => {
+  it("shows the checkbox for flood/smooth only and rides its value on the mask request", async () => {
+    render(<ImagePrep catalogColors={[]} />);
+    const canvas = await enterFlatten();
+
+    // Off by default; the hover request carries catchStrays: false.
+    const box = catchStraysBox();
+    expect(box).not.toBeNull();
+    expect(box).not.toBeChecked();
+    await hover(canvas, 0.5, 0.5);
+    expect(lastMaskBody()).toEqual(
+      expect.objectContaining({ op: "mask", catchStrays: false }),
+    );
+
+    // Enabling it re-issues the hover with catchStrays: true.
+    fireEvent.click(box!);
+    await hover(canvas, 1.5, 0.5);
+    expect(lastMaskBody()).toEqual(
+      expect.objectContaining({ op: "mask", catchStrays: true }),
+    );
+
+    // The checkbox is available in smooth mode too, but not in brush.
+    fireEvent.click(screen.getByRole("radio", { name: "Smooth" }));
+    expect(catchStraysBox()).not.toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: "Brush" }));
+    expect(catchStraysBox()).toBeNull();
+    await act(async () => {}); // flush the hover re-issue from the mode switches
+  });
+});
+
+describe("recolor every match (R17, R20, R22)", () => {
+  /** 3×1 stripe: black | white | black — the two blacks are disconnected. */
+  function decodedStripe(): DecodedImage {
+    return {
+      pixels: buf(3, 1, [grey(0), grey(255), grey(0)]),
+      originalWidth: 3,
+      originalHeight: 1,
+      downscaled: false,
+    };
+  }
+
+  async function enterStripe(): Promise<HTMLElement> {
+    mocks.decodeSpy.mockImplementation(async () => decodedStripe());
+    fireEvent.change(screen.getByLabelText(/source image/i), {
+      target: { files: [makeFile("stripe.png")] },
+    });
+    await screen.findByText(/3 × 1 px/);
+    fireEvent.click(screen.getByRole("button", { name: "Start flatten" }));
+    const canvas = screen.getByLabelText("Flatten canvas");
+    stubRect(canvas, 3, 1);
+    await act(async () => {});
+    return canvas;
+  }
+
+  it("is disabled at the suggested fill, enabled after choosing another, and swaps every match", async () => {
+    render(<ImagePrep catalogColors={[]} />);
+    const canvas = await enterStripe();
+
+    // Flood-select the LEFT black pixel only — the right black stays outside.
+    await selectAt(canvas, 0.5, 0.5);
+    await screen.findByText("1 px selected");
+
+    const recolor = screen.getByRole("button", {
+      name: "Recolor every match",
+    });
+    expect(recolor).toBeDisabled(); // chosen fill == suggested (black)
+
+    fireEvent.change(screen.getByLabelText("Hex color"), {
+      target: { value: "#00ff00" },
+    });
+    expect(screen.getByText(/Fill with/)).toHaveTextContent("#00ff00");
+    expect(recolor).toBeEnabled();
+
+    fireEvent.click(recolor);
+    // Selection clears, the counter is UNCHANGED (recolor collapses no region).
+    await waitFor(() => expect(screen.queryByText(/px selected/)).toBeNull());
+    expect(counter(0)).toBeInTheDocument();
+    expect(undoButton()).toBeEnabled();
+    expect(lastFlattenBody()).toEqual(
+      expect.objectContaining({
+        op: "flatten",
+        action: expect.objectContaining({
+          kind: "recolor",
+          from: { r: 0, g: 0, b: 0 },
+          to: { r: 0, g: 255, b: 0 },
+        }),
+      }),
+    );
+
+    // The RIGHT black pixel (outside the original selection) is now green.
+    await selectAt(canvas, 2.5, 0.5);
+    await screen.findByText("1 px selected");
+    expect(
+      screen.getByRole("button", { name: "Use suggested #00ff00" }),
+    ).toBeInTheDocument();
+
+    // Undo reverts the recolor (pixels back to black), counter still 0.
+    fireEvent.keyDown(window, { key: "z" });
+    await waitFor(() => expect(undoButton()).toBeDisabled());
+    expect(counter(0)).toBeInTheDocument();
+    await selectAt(canvas, 2.5, 0.5);
+    await screen.findByText("1 px selected");
+    expect(
+      screen.getByRole("button", { name: "Use suggested #000000" }),
+    ).toBeInTheDocument();
   });
 });
