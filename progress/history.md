@@ -219,3 +219,31 @@
 **Reports:** `progress/impl_11_image_prep.md`, `progress/review_11_image_prep.md`.
 
 ---
+
+## 12_flatten — DONE (2026-07-19)
+
+**Feature:** Region-by-region manual **Flatten** stage for `/image-prep` — hover a mask, W/S to resize, click to collect regions, collapse them to one color; plus whole-image cleanup. Requested during live use with reference screenshots. spec_author → human-approved (all three phases) → implemented and reviewed **phase by phase**, each phase committed and deployed separately: **Phase A** (`9cdc5a9`, flood/brush select + flatten + undo), **Phase B** (`42f75bf`, smooth mode + catch strays + recolor every match), **Phase C** (`383bd7e`, presets + despeckle + zoom/pan/expand). Three reviewer-APPROVED gates. Depends on `11_image_prep`.
+
+**Delivered:** `lib/flatten-core.ts` — a second PURE core (no DOM/Prisma/React, no new dependency) at **100% branch coverage**, sibling to `image-prep-core.ts` rather than an extension of it (justified in design.md): `floodMask` (FIFO 4-connected BFS, fixed neighbor order, seed always included — **iterative, no recursion blowup**), `smoothMask` (gradient-tuned wider matching), `brushMask`, `addStrayIslands` (small + near islands only, bounded by `STRAY_MAX_ISLAND_PX`/`STRAY_MARGIN_PX`), mask algebra (`union`/`subtract`/`contains`/`outline`/`pixelCount`), `maskStats` (count desc, first-row-major-appearance tie-break) driving the suggested fill + runner-ups, `parseHexInput` (never throws), `applyFillToMask`, `recolorExact` (image-wide exact-match swap), `removeSmallRegions` (despeckle/presets — majority border color sampled from the **INPUT** so overlapping recolors never interfere, smallest-area-first, borderless whole-image no-op), and view math (`clampView`/`zoomAt`/`panBy`). New worker actions (`mask`, `flatten`/`fill`/`recolor`/`removeSmall`) on the existing stateless worker — still a logic-free dispatcher. Components `FlattenStartCard` / `FlattenWorkspace` / `FlattenCanvas` / `FlattenControls` / `FlattenFillPanel`, plus `canvas-paint.ts` (the `paint()` helper extracted verbatim from `BeforeAfterPreview`, jsdom guards intact, now shared).
+
+**Stage integration:** a `FlattenStage` joins the existing `Stage` union carrying a **resume snapshot**, so entering/exiting Flatten preserves the palette AND its R20 undo history; the R16 invariant (upstream changes discard downstream results) still holds. Flatten has its **own** undo scope (Z / Ctrl+Z, cap `MAX_FLATTEN_HISTORY` 12) covering every mutation — flatten, recolor, presets, despeckle — plus Reset all back to the stage-entry image and an "N regions flattened" counter.
+
+**Hover responsiveness:** mask previews post to the worker with **one request in flight**; stale responses are discarded and re-issued via seed-identity refresh, so dragging the cursor never floods the worker. Brush masks are computed synchronously (cheap enough).
+
+**Click geometry under zoom/pan (the main correctness risk):** `FlattenCanvas` renders a `translate/scale` transform inside a clipping viewport, and `resolvePixel` reads the base canvas's own `getBoundingClientRect()` — which already reflects the CSS transform — feeding the **existing, already-unit-tested** `mapClickToPixel` from feature 11. So picking stays pixel-accurate at any zoom/pan with no new geometry math. Pinned by a test that genuinely fails if the scale division is dropped.
+
+**No-persistence contract (same as 11) — independently verified:** `prisma/` untouched, no server action, no API route, no Storage code, no env var, no new dependency, no vitest/next/playwright config change; `lib/image-prep-core.ts` diff empty. R28 spot-checked via `git status` at the close-out gate.
+
+**Requirements:** R1–R28 all satisfied and traced to real behavioral tests (final reviewer produced the full R→test map).
+
+**Verification:** typecheck 0 errors, lint 0 errors (the same 4 pre-existing unrelated `WeekPlanner.test.tsx` warnings), Vitest **989 tests / 65 files** (was 847/61 at the end of 11 → +142 tests / +4 files), 0 failures; `lib/flatten-core.ts` **100% statements/branch/functions/lines**; all changed modules ≥ 80% lines (`FlattenCanvas` 95.5%, `FlattenWorkspace` 94.6%, most others 100%). Build intentionally skipped during dev (running dev server shares `.next`); Vercel is the build target. Reviewer independently reproduced at each of the three gates.
+
+**Deviations (minor, reviewer-accepted):** view state (`view`/`expanded`) lives in `FlattenCanvas` rather than `FlattenWorkspace` — zoom/pan need the live DOM viewport box for focal-point zoom and pan clamping, so it is owned where the measurements happen (it still resets on stage entry because the two remount together); Space-to-pan is likewise handled in the canvas (the workspace keyboard map W/S/Enter/Esc/Z is untouched, different keys, no conflict); `clampView` uses the stricter "content covers the viewport" clamp, which satisfies both "cannot be dragged fully out" and "zoom 1 forces origin" from one formula with no special-case branch.
+
+**Known flake (pre-existing, not Phase-C code):** one feature-11 palette test ("reverts the last palette action via Ctrl+Z", already carrying pre-existing `act(...)` warnings) flaked once under full-suite ordering and passed on isolated and repeat full runs.
+
+**Outstanding (credential-gated, dev/staging only — never production):** run Playwright E2E (`e2e/flatten.spec.ts`: enter flatten → flood select → flatten → undo → Despeckle → exit) after setting `.env.local` + E2E account vars.
+
+**Reports:** `progress/impl_12_flatten.md`, `progress/review_12_flatten_phaseA.md`, `progress/review_12_flatten_phaseB.md`, `progress/review_12_flatten_phaseC.md`.
+
+---

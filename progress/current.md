@@ -1,23 +1,12 @@
 # Current session
 
 ## Feature in progress
-`12_flatten` — **in_progress**. Spec approved by the human (2026-07-19, all
-three phases); implementer executing `specs/12_flatten/tasks.md` phase by
-phase (A → B → C), reviewer gate + deploy after each phase.
-
-New feature added to `feature_list.json` (2026-07-19): region-by-region
-manual Flatten stage for image-prep (flood/smooth/brush masks with W/S
-resize, multi-region selection, most-common-color fill suggestion with
-runner-ups, flatten selection / recolor every match, Low-Med-High
-auto-flatten presets, despeckle, per-region undo, reset, zoom/pan).
-Client-side only, no persistence; depends on `11_image_prep`. tasks.md
-is phased (A: core select+flatten+undo · B: smooth/catch-strays/recolor
-· C: presets/despeckle/zoom-pan-expand) so it can be approved and
-delivered incrementally.
+_None — no feature is currently in progress. Pick up the next `pending`
+feature in `feature_list.json` per the SDD flow._
 
 ## State
-All features `00`–`11` are reviewer-APPROVED and `done` (see `progress/history.md`
-for per-feature entries). Latest full run: **847 tests / 61 files** green
+All features `00`–`12` are reviewer-APPROVED and `done` (see `progress/history.md`
+for per-feature entries). Latest full run: **989 tests / 65 files** green
 (typecheck · lint · Vitest).
 
 **Deployed.** The app is live on Vercel, auto-deploying from `main`:
@@ -41,6 +30,13 @@ for per-feature entries). Latest full run: **847 tests / 61 files** green
   adjust → posterize (median cut in a Web Worker) → palette merge tools → snap
   to the Color catalog → download PNG. No persistence (no model/migration/
   Storage). Pure `lib/image-prep-core.ts` at 100% branch coverage.
+- `12_flatten` — region-by-region manual **Flatten** stage inside `/image-prep`:
+  flood/smooth/brush mask preview with W/S resize, multi-region selection,
+  most-common-color fill suggestion + runner-ups, Flatten selection, Recolor
+  every match, Low/Medium/High presets, Despeckle, flatten-scoped Z-undo,
+  Reset all, zoom/pan/Expand. Second pure core `lib/flatten-core.ts` at 100%
+  branch coverage. No persistence. Delivered in three reviewed phases
+  (A `9cdc5a9` · B `42f75bf` · C `383bd7e`).
 - Dark theme; shared `MainNav` (consistent app/admin nav + Catalogs + Calculator
   + Image prep links); planning picker lists the full Color catalog; home
   "Get started" wired to `/board`.

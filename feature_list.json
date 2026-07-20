@@ -89,7 +89,7 @@
       "name": "12_flatten",
       "description": "Region-by-region manual flatten stage for image-prep (client-side, NO persistence): hover the working image to preview a mask (Flood mode snaps to the contiguous similar-color region under the cursor per a tolerance; Brush mode is a plain circle; optional Smooth mode for gradients), W/S grows/shrinks the mask, click adds the region to the selection (click again removes), Esc clears, scroll zooms, drag pans. The panel suggests the selection's most-common color with runner-up swatches (click an alternate, type a hex, or eyedropper-pick), then Flatten selection collapses the selected pixels to that color; Recolor every match swaps that color image-wide. Whole-image helpers: Low/Medium/High auto-flatten presets, Despeckle (remove isolated stray pixels, HueForge spike removal), Z/undo per region, Reset all, and a regions-flattened counter. Heavy work (flood fill, despeckle, presets) in the existing Web Worker; pure region/mask math in lib/, fully unit-tested.",
       "sdd": true,
-      "status": "in_progress",
+      "status": "done",
       "depends_on": ["11_image_prep"]
     }
   ]
