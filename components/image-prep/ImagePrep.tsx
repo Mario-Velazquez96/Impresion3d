@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AdjustPanel } from "@/components/image-prep/AdjustPanel";
 import { BeforeAfterPreview } from "@/components/image-prep/BeforeAfterPreview";
+import { CropStartCard } from "@/components/image-prep/CropStartCard";
+import { CropWorkspace } from "@/components/image-prep/CropWorkspace";
 import { FlattenStartCard } from "@/components/image-prep/FlattenStartCard";
 import { FlattenWorkspace } from "@/components/image-prep/FlattenWorkspace";
 import { HistogramChart } from "@/components/image-prep/HistogramChart";
@@ -22,6 +24,7 @@ import {
   type PaletteAction,
   type PixelPayload,
 } from "@/components/image-prep/worker-messages";
+import { cropPixels, type CropRect } from "@/lib/crop-core";
 import { MAX_FLATTEN_HISTORY } from "@/lib/flatten-core";
 import {
   paletteIndexAt,
@@ -43,7 +46,11 @@ import {
  * so Exit flatten restores it — palette and palette-undo history included —
  * as a pure state swap (12/R3). While flattening, Adjust/Posterize read
  * their sources THROUGH `resume`, which is how upstream operations discard
- * the stage.
+ * the stage. The crop stage (13/R1, R13, R14) works the same way one step
+ * further UPSTREAM: it carries its whole pre-crop stage in `resume` (Cancel is
+ * a pure restore), holds no image state at all, and Apply builds a fresh
+ * `loaded` stage from the cropped source — structurally discarding every
+ * downstream result under the same 11/R16 invariant.
  *
  * Nothing recomputes on slider movement; only the explicit Apply / Posterize /
  * merge / snap / flatten buttons post work to the Web Worker (R5, R7, R18).
@@ -52,9 +59,18 @@ import {
  */
 
 type LoadedFields = {
+  /** The pipeline SOURCE — the CROPPED image after a crop (13/R13). */
   original: PixelBuffer;
+  /**
+   * The as-decoded (cap-downscaled) upload. The SAME reference as `original`
+   * until the first crop, so an uncropped session costs no extra memory;
+   * afterwards it powers Revert to uncropped (13/R15). `original !== uploaded`
+   * IS the "cropped" flag — there is no boolean to keep in sync.
+   */
+  uploaded: PixelBuffer;
   fileName: string;
   fileBytes: number;
+  /** The FILE's dimensions (11/R4 notice) — unchanged by a crop. */
   originalDims: { width: number; height: number };
   downscaled: boolean;
 };
@@ -118,12 +134,28 @@ type FlattenStage = {
   regionsFlattened: number;
 };
 
+/** Every non-empty stage crop can be entered from — and restored to (R1, R14). */
+type CropResume = LoadedStage | AdjustedStage | QuantizedStage | FlattenStage;
+
+/**
+ * The crop stage (13/R1) carries NO image state: it edits nothing, so Cancel is
+ * a one-line pure restore and there is no entry snapshot, history or counter.
+ * The target size and rectangle are transient UI state owned by
+ * `CropWorkspace` (the same split feature 12 uses).
+ */
+type CropStage = {
+  kind: "crop";
+  /** The EXACT pre-crop stage object (cheap references) (R14). */
+  resume: CropResume;
+};
+
 type Stage =
   | EmptyStage
   | LoadedStage
   | AdjustedStage
   | QuantizedStage
-  | FlattenStage;
+  | FlattenStage
+  | CropStage;
 
 /** Copy pixels into a fresh transferable ArrayBuffer (state stays intact). */
 function copyPixels(pixels: PixelBuffer): ArrayBuffer {
@@ -147,6 +179,52 @@ function resumeWorkingImage(stage: FlattenResume): PixelBuffer {
       : stage.original;
 }
 
+/**
+ * The newest completed working image of ANY non-empty stage: the flatten
+ * working image while flattening, and — while cropping — whatever the resumed
+ * stage would show, so the crop canvas frames against the most informative
+ * reference (13/R1).
+ */
+function workingImageOf(stage: Exclude<Stage, EmptyStage>): PixelBuffer {
+  if (stage.kind === "crop") {
+    return workingImageOf(stage.resume);
+  }
+  return stage.kind === "flatten" ? stage.current : resumeWorkingImage(stage);
+}
+
+/**
+ * Unwrap a stage down to the pipeline stage that owns the upload fields:
+ * `crop → resume → (flatten → resume)` (13/R1, R16). Upstream reads (upload
+ * info, Adjust, Posterize, Histogram, and the crop source) all go through it,
+ * which is how an upstream operation structurally discards the wrapping stages.
+ */
+function baseOf(stage: Exclude<Stage, EmptyStage>): FlattenResume;
+function baseOf(stage: Stage): FlattenResume | null;
+function baseOf(stage: Stage): FlattenResume | null {
+  if (stage.kind === "empty") {
+    return null;
+  }
+  if (stage.kind === "crop") {
+    return baseOf(stage.resume);
+  }
+  if (stage.kind === "flatten") {
+    return stage.resume;
+  }
+  return stage;
+}
+
+/** The upload fields carried forward into any freshly built stage. */
+function loadedFieldsOf(stage: FlattenResume): LoadedFields {
+  return {
+    original: stage.original,
+    uploaded: stage.uploaded,
+    fileName: stage.fileName,
+    fileBytes: stage.fileBytes,
+    originalDims: stage.originalDims,
+    downscaled: stage.downscaled,
+  };
+}
+
 export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
   const { request, busy } = useImagePrepWorker();
   const [stage, setStage] = useState<Stage>({ kind: "empty" });
@@ -159,15 +237,11 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
   const [pickMode, setPickMode] = useState(false);
 
   // Upstream reads (upload info, Adjust, Posterize, Histogram) go through the
-  // pre-flatten stage while flattening (12/R2), so both handlers build their
-  // fresh stage from `base` and structurally discard the flatten stage.
-  const base: FlattenResume | null =
-    stage.kind === "flatten"
-      ? stage.resume
-      : stage.kind === "empty"
-        ? null
-        : stage;
+  // pre-flatten / pre-crop stage (12/R2, 13/R16), so every handler builds its
+  // fresh stage from `base` and structurally discards the wrapping stage.
+  const base: FlattenResume | null = baseOf(stage);
   const hasImage = base !== null;
+  const cropping = stage.kind === "crop";
   const quantizedImage: IndexedImage | null =
     stage.kind === "quantized" ? stage.image : null;
 
@@ -214,13 +288,9 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
 
   // The newest completed stage feeds both the "after" pane and Download
   // (11/R15, R17); the flatten working image takes over while flattening
-  // (12/R27).
+  // (12/R27), and the crop canvas frames against that same image (13/R1).
   const workingImage: PixelBuffer | null =
-    stage.kind === "flatten"
-      ? stage.current
-      : base
-        ? resumeWorkingImage(base)
-        : null;
+    stage.kind === "empty" ? null : workingImageOf(stage);
 
   // The histogram survives visually through the flatten stage via `resume`.
   const histogram: Uint32Array | null =
@@ -233,6 +303,8 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
     setStage({
       kind: "loaded",
       original: decoded.pixels,
+      // Until a crop, the upload IS the pipeline source (13/R13, R15).
+      uploaded: decoded.pixels,
       fileName: file.name,
       fileBytes: file.size,
       originalDims: {
@@ -247,13 +319,7 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
     if (!base) {
       return;
     }
-    const loaded: LoadedFields = {
-      original: base.original,
-      fileName: base.fileName,
-      fileBytes: base.fileBytes,
-      originalDims: base.originalDims,
-      downscaled: base.downscaled,
-    };
+    const loaded: LoadedFields = loadedFieldsOf(base);
     try {
       const result = await request({
         op: "adjust",
@@ -284,13 +350,7 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
     // original IS the adjusted image (adjustments are optional).
     const source = base.kind === "loaded" ? base.original : base.adjusted;
     const sourceHistogram = base.kind === "loaded" ? null : base.histogram;
-    const loaded: LoadedFields = {
-      original: base.original,
-      fileName: base.fileName,
-      fileBytes: base.fileBytes,
-      originalDims: base.originalDims,
-      downscaled: base.downscaled,
-    };
+    const loaded: LoadedFields = loadedFieldsOf(base);
     try {
       const result = await request({
         op: "quantize",
@@ -413,7 +473,14 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
   // `resume`, seed the undo history with the single baseline, counter 0.
   const handleEnterFlatten = useCallback(() => {
     setStage((current) => {
-      if (current.kind === "empty" || current.kind === "flatten") {
+      // Start flatten is disabled while cropping (13/R16), so a crop stage can
+      // never become a `FlattenResume` — the nesting is at most
+      // `crop → flatten → quantized`, and the types enforce it.
+      if (
+        current.kind === "empty" ||
+        current.kind === "flatten" ||
+        current.kind === "crop"
+      ) {
         return current;
       }
       const working = resumeWorkingImage(current);
@@ -500,6 +567,74 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
     });
   }, []);
 
+  // ---- crop stage (13_crop) -------------------------------------------------
+
+  // Enter (R1): keep the WHOLE current stage in `resume`; the stage itself
+  // carries no image state, so this is all the durable state a crop needs.
+  const handleEnterCrop = useCallback(() => {
+    setStage((current) =>
+      current.kind === "empty" || current.kind === "crop"
+        ? current
+        : { kind: "crop", resume: current },
+    );
+  }, []);
+
+  // Cancel (R14): a pure restore of the pre-crop stage object — the palette and
+  // its undo history, or the flatten image/history/counter, come back untouched
+  // because they are the same objects.
+  const handleCancelCrop = useCallback(() => {
+    setStage((current) => (current.kind === "crop" ? current.resume : current));
+  }, []);
+
+  // Apply (R13): crop the pipeline SOURCE (never the posterized/flattened
+  // preview) on the MAIN THREAD — one row-wise copy, no worker op (R21) — and
+  // commit it as a FRESH `loaded` stage. The adjusted buffer, histogram,
+  // palette + its undo history, and any flatten edits simply have no field to
+  // survive in: 11/R16 applied one stage further upstream.
+  const handleApplyCrop = useCallback((rect: CropRect) => {
+    setStage((current) => {
+      if (current.kind !== "crop") {
+        return current;
+      }
+      const source = baseOf(current.resume);
+      return {
+        kind: "loaded",
+        ...loadedFieldsOf(source),
+        original: cropPixels(source.original, rect),
+      };
+    });
+  }, []);
+
+  // Revert to uncropped (R15): the same fresh-`loaded` construction with the
+  // as-uploaded image. A single level that always returns to the full upload,
+  // so repeated crops can never strand the user.
+  const handleRevertCrop = useCallback(() => {
+    setStage((current) => {
+      if (current.kind === "empty") {
+        return current;
+      }
+      const source = baseOf(current);
+      if (source.original === source.uploaded) {
+        return current;
+      }
+      return {
+        kind: "loaded",
+        ...loadedFieldsOf(source),
+        original: source.uploaded,
+      };
+    });
+  }, []);
+
+  const croppedInfo =
+    base && base.original !== base.uploaded
+      ? {
+          width: base.original.width,
+          height: base.original.height,
+          uploadedWidth: base.uploaded.width,
+          uploadedHeight: base.uploaded.height,
+        }
+      : null;
+
   return (
     <div className="flex flex-col gap-4">
       {busy ? (
@@ -518,9 +653,13 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
         <div className="flex w-full flex-col gap-4 lg:w-80 lg:shrink-0">
           <ImageDropzone onLoaded={handleLoaded} info={info} busy={busy} />
 
+          {/* Cropping is a modal geometry decision whose commit discards these
+              anyway, so they are disabled while it is active (13/R16). The
+              dropzone above stays live: loading a file discards the crop
+              stage with everything else (11/R16). */}
           <AdjustPanel
             onApply={(settings) => void handleApply(settings)}
-            disabled={!hasImage}
+            disabled={!hasImage || cropping}
             busy={busy}
           />
 
@@ -530,16 +669,25 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
             onPosterize={(colors, dither) =>
               void handlePosterize(colors, dither)
             }
-            disabled={!hasImage}
+            disabled={!hasImage || cropping}
             busy={busy}
           />
 
           <FlattenStartCard
             active={stage.kind === "flatten"}
-            canStart={hasImage}
+            canStart={hasImage && !cropping}
             busy={busy}
             onStart={handleEnterFlatten}
             onExit={handleExitFlatten}
+          />
+
+          <CropStartCard
+            active={cropping}
+            canStart={hasImage}
+            busy={busy}
+            cropped={croppedInfo}
+            onStart={handleEnterCrop}
+            onRevert={handleRevertCrop}
           />
 
           {stage.kind === "quantized" ? (
@@ -576,7 +724,16 @@ export function ImagePrep({ catalogColors }: { catalogColors: ColorView[] }) {
           ) : null}
         </div>
 
-        {stage.kind === "flatten" ? (
+        {stage.kind === "crop" && workingImage ? (
+          <div className="w-full flex-1 lg:sticky lg:top-4 lg:self-start">
+            <CropWorkspace
+              working={workingImage}
+              busy={busy}
+              onApply={handleApplyCrop}
+              onCancel={handleCancelCrop}
+            />
+          </div>
+        ) : stage.kind === "flatten" ? (
           <div className="w-full flex-1 lg:sticky lg:top-4 lg:self-start">
             <FlattenWorkspace
               current={stage.current}

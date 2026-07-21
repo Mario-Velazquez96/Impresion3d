@@ -1,8 +1,18 @@
 # Current session
 
 ## Feature in progress
-_None — no feature is currently in progress. Pick up the next `pending`
-feature in `feature_list.json` per the SDD flow._
+`13_crop` — **in_progress**. Spec approved by the human (2026-07-21);
+implementer executing `specs/13_crop/tasks.md` (single phase).
+
+Added 2026-07-21 after a feasibility discussion: the user was leaving the
+app to crop images in **Canva** to an exact physical print size (their
+example 71.7 × 94 mm) before HueForge. Agreed framing: a mm target is
+really (1) an exact aspect ratio — needs no DPI — and (2) an absolute
+pixel size, which would need a px/mm choice. For HueForge only (1)
+matters, so the user chose **option A: ratio-only** — crop to the exact
+ratio, keep maximum available pixels, NO resampling. Persisted
+user-defined presets are deliberately OUT of scope: they would break the
+no-persistence contract shared by 11 and 12 (built-in constants only).
 
 ## State
 All features `00`–`12` are reviewer-APPROVED and `done` (see `progress/history.md`

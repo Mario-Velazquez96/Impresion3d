@@ -1150,3 +1150,285 @@ describe("flatten stage integration (12_flatten: R1, R2, R3, R22, R27)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Crop stage integration (13_crop: R1, R13, R14, R15, R16, R21, R22). The crop
+ * geometry itself is covered by `crop-core.test.ts` and
+ * `CropWorkspace.test.tsx`; this block owns the ISLAND contract: modality, the
+ * fresh-`loaded` commit that discards every downstream result, the pure Cancel
+ * restore, Revert, and the "no worker traffic" guarantee.
+ */
+describe("crop stage integration (13_crop: R1, R13–R16, R21, R22)", () => {
+  const startCrop = () => screen.getByRole("button", { name: "Start crop" });
+  const cropWorkspace = () =>
+    screen.queryByRole("heading", { name: "Crop workspace" });
+  const revertButton = () =>
+    screen.queryByRole("button", { name: "Revert to uncropped" });
+
+  /** A 40 × 40 ramp: the default 71.7 × 94 mm Fit rectangle is 30 × 39 px. */
+  function decodedBig(): DecodedImage {
+    const data = new Uint8ClampedArray(40 * 40 * 4);
+    for (let i = 0; i < 40 * 40; i++) {
+      data[i * 4] = i % 256;
+      data[i * 4 + 1] = (i * 3) % 256;
+      data[i * 4 + 2] = (i * 7) % 256;
+      data[i * 4 + 3] = 255;
+    }
+    return {
+      pixels: { width: 40, height: 40, data },
+      originalWidth: 40,
+      originalHeight: 40,
+      downscaled: false,
+    };
+  }
+
+  async function loadBig(name = "big.png") {
+    mocks.decodeSpy.mockImplementation(async () => decodedBig());
+    fireEvent.change(screen.getByLabelText(/source image/i), {
+      target: { files: [makeFile(name, "image/png")] },
+    });
+    await screen.findByText(/40 × 40 px/);
+  }
+
+  async function enterCrop() {
+    fireEvent.click(startCrop());
+    await act(async () => {});
+  }
+
+  function stubRect(el: HTMLElement, width: number, height: number) {
+    vi.spyOn(el, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: width,
+      bottom: height,
+      width,
+      height,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+  }
+
+  const originalCanvas = () =>
+    screen.getByLabelText("Original image") as HTMLCanvasElement;
+
+  it("offers Start crop from every loaded stage and blocks it while busy (R1)", async () => {
+    const view = render(<ImagePrep catalogColors={CATALOG} />);
+    expect(startCrop()).toBeDisabled(); // no image yet
+
+    await loadSample();
+    expect(startCrop()).toBeEnabled(); // loaded
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await screen.findByTestId("luminance-histogram");
+    expect(startCrop()).toBeEnabled(); // adjusted
+
+    await posterize();
+    expect(startCrop()).toBeEnabled(); // quantized
+
+    fireEvent.click(screen.getByRole("button", { name: "Start flatten" }));
+    await act(async () => {});
+    expect(startCrop()).toBeEnabled(); // flatten
+
+    mocks.busyRef.value = true;
+    view.rerender(<ImagePrep catalogColors={CATALOG} />);
+    expect(startCrop()).toBeDisabled();
+  });
+
+  it("goes modal: palette hidden, Adjust/Posterize/Start-flatten disabled, dropzone live (R16)", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+    expect(screen.getByRole("heading", { name: "Palette" })).toBeInTheDocument();
+
+    await enterCrop();
+    expect(cropWorkspace()).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Palette" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Posterize" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Start flatten" })).toBeDisabled();
+    // The dropzone stays live — and a new file discards the crop stage.
+    expect(screen.getByLabelText(/source image/i)).toBeEnabled();
+    await loadSample("fresh.png");
+    await waitFor(() => expect(cropWorkspace()).toBeNull());
+    expect(startCrop()).toBeEnabled();
+  });
+
+  it("Apply crops the SOURCE into a fresh loaded stage, discarding palette + flatten (R13)", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadBig();
+    await posterize();
+    fireEvent.click(screen.getByRole("button", { name: "Start flatten" }));
+    await act(async () => {});
+    await enterCrop();
+
+    const callsBefore = mocks.requestSpy.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Apply crop" }));
+    await waitFor(() => expect(cropWorkspace()).toBeNull());
+
+    // The pipeline restarted from the cropped image at the readout's size.
+    expect(screen.getByText("30 × 39 px · 8 B")).toBeInTheDocument();
+    expect(originalCanvas().width).toBe(30);
+    expect(originalCanvas().height).toBe(39);
+    // Every downstream result is gone: no palette, no flatten workspace.
+    expect(screen.queryByRole("heading", { name: "Palette" })).toBeNull();
+    expect(
+      screen.queryByRole("heading", { name: "Flatten workspace" }),
+    ).toBeNull();
+    // Apply is pure main-thread work — no worker request at all (R21).
+    expect(mocks.requestSpy.mock.calls.length).toBe(callsBefore);
+  });
+
+  it("Cancel restores the quantized stage WITH its palette-undo depth (R14)", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    await posterize();
+    await mergeSelectionInto(["#000000"], "#ffffff");
+    await waitFor(() =>
+      expect(paletteEntry("#ffffff")).toHaveTextContent("75.0%"),
+    );
+    expect(screen.getByRole("button", { name: "Undo" })).toBeEnabled();
+
+    await enterCrop();
+    expect(screen.queryByRole("heading", { name: "Palette" })).toBeNull();
+    const callsBefore = mocks.requestSpy.mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    // The merged palette AND its undo depth come back exactly as left.
+    expect(paletteEntry("#ffffff")).toHaveTextContent("75.0%");
+    const undo = screen.getByRole("button", { name: "Undo" });
+    expect(undo).toBeEnabled();
+    fireEvent.click(undo);
+    await waitFor(() =>
+      expect(paletteEntry("#000000")).toHaveTextContent("50.0%"),
+    );
+    expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
+    expect(mocks.requestSpy.mock.calls.length).toBe(callsBefore);
+  });
+
+  it("Cancel restores the flatten stage with its image, history and counter (R14)", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample();
+    fireEvent.click(screen.getByRole("button", { name: "Start flatten" }));
+    const canvas = screen.getByLabelText("Flatten canvas");
+    stubRect(canvas, 2, 2);
+    await act(async () => {});
+
+    // Brush-select the whole 2 × 2 image and flatten it once.
+    fireEvent.click(screen.getByRole("radio", { name: "Brush" }));
+    fireEvent.click(canvas, { clientX: 0.5, clientY: 0.5 });
+    await screen.findByText("4 px selected");
+    fireEvent.click(screen.getByRole("button", { name: "Flatten selection" }));
+    await waitFor(() =>
+      expect(screen.getByText("1 regions flattened")).toBeInTheDocument(),
+    );
+    await act(async () => {});
+
+    await enterCrop();
+    expect(
+      screen.queryByRole("heading", { name: "Flatten workspace" }),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(
+      screen.getByRole("heading", { name: "Flatten workspace" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("1 regions flattened")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Undo" })).toBeEnabled();
+  });
+
+  it("Revert to uncropped restores the upload and then disappears (R15)", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadBig();
+    expect(revertButton()).toBeNull(); // nothing cropped yet
+
+    await enterCrop();
+    fireEvent.click(screen.getByRole("button", { name: "Apply crop" }));
+    await waitFor(() => expect(cropWorkspace()).toBeNull());
+    expect(screen.getByText("30 × 39 px · 8 B")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Cropped to 30 × 39 px — from 40 × 40/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(revertButton() as HTMLElement);
+    await waitFor(() =>
+      expect(screen.getByText("40 × 40 px · 8 B")).toBeInTheDocument(),
+    );
+    expect(originalCanvas().width).toBe(40);
+    expect(revertButton()).toBeNull(); // a single level, now spent
+
+    // Cropping again re-offers it.
+    await enterCrop();
+    fireEvent.click(screen.getByRole("button", { name: "Apply crop" }));
+    await waitFor(() => expect(revertButton()).not.toBeNull());
+  });
+
+  it("Download after Apply exports the CROPPED image, client-side (R13, R22)", async () => {
+    const downloads: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+      function (this: HTMLAnchorElement) {
+        downloads.push(this.download);
+      },
+    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadBig("photo.jpg");
+    await enterCrop();
+    fireEvent.click(screen.getByRole("button", { name: "Apply crop" }));
+    await waitFor(() => expect(cropWorkspace()).toBeNull());
+
+    // The "after" pane — what Download exports — is the cropped image.
+    expect(
+      (screen.getByLabelText("Working image preview") as HTMLCanvasElement)
+        .width,
+    ).toBe(30);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Download PNG" }));
+    });
+    expect(downloads).toEqual(["photo-prepped.png"]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("posts NO worker request for entering, cancelling or applying a crop (R21)", async () => {
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadBig();
+    const callsBefore = mocks.requestSpy.mock.calls.length;
+
+    await enterCrop();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await enterCrop();
+    fireEvent.click(screen.getByRole("button", { name: "Apply crop" }));
+    await waitFor(() => expect(cropWorkspace()).toBeNull());
+    fireEvent.click(revertButton() as HTMLElement);
+
+    expect(mocks.requestSpy.mock.calls.length).toBe(callsBefore);
+  });
+});
+
+describe("flatten download (12_flatten: R27)", () => {
+  const startButton = () =>
+    screen.getByRole("button", { name: "Start flatten" });
+
+  it("Download during flatten names <base>-prepped.png with no network (R27)", async () => {
+    const downloads: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+      function (this: HTMLAnchorElement) {
+        downloads.push(this.download);
+      },
+    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    render(<ImagePrep catalogColors={CATALOG} />);
+    await loadSample("photo.jpg");
+    fireEvent.click(startButton());
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Download PNG" }));
+    });
+    expect(downloads).toEqual(["photo-prepped.png"]);
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});

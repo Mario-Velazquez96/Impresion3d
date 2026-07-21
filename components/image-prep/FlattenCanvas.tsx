@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useRef, type MouseEvent } from "react";
 
 import { mapClickToPixel } from "@/components/image-prep/BeforeAfterPreview";
 import { paint } from "@/components/image-prep/canvas-paint";
-import { clampView, IDENTITY_VIEW, panBy, zoomAt } from "@/lib/flatten-core";
+import { useCanvasView } from "@/components/image-prep/use-canvas-view";
 import { downloadFileName, type PixelBuffer } from "@/lib/image-prep-core";
 
 /**
@@ -21,7 +21,11 @@ import { downloadFileName, type PixelBuffer } from "@/lib/image-prep-core";
  * viewport box for focal-point zoom and pan clamping, and it resets to the
  * identity view whenever the flatten stage (re)mounts this component (R1, R23).
  * A non-passive `wheel` listener lets us `preventDefault` the page scroll;
- * panning is middle-button drag or Space-held left drag.
+ * panning is middle-button drag or Space-held left drag. That whole glue —
+ * viewport ref, ResizeObserver content measurement, wheel zoom, Space tracking,
+ * drag pan, Expand, and the class/transform derivation — now lives in the
+ * shared `useCanvasView` hook (13_crop), extracted from here VERBATIM and also
+ * consumed by the crop canvas. Behavior is unchanged.
  */
 export function FlattenCanvas({
   current,
@@ -46,33 +50,17 @@ export function FlattenCanvas({
 }) {
   const baseRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
-  const viewportRef = useRef<HTMLDivElement>(null);
 
-  const [view, setView] = useState(IDENTITY_VIEW);
-  const [expanded, setExpanded] = useState(false);
-
-  // Drag-pan bookkeeping: the last pointer position while a pan is active, and
-  // whether Space is held (Space + left drag pans instead of selecting). Refs,
-  // not state, so the fast-moving pointer path never re-renders.
-  const panFromRef = useRef<{ x: number; y: number } | null>(null);
-  const spaceHeldRef = useRef(false);
-
-  // The base canvas's UNTRANSFORMED layout size, which is what the pan bounds
-  // must be derived from — the viewport is not a stand-in for it, since the
-  // canvas is fitted (`object-contain`) and can be smaller than the box in one
-  // axis. Deliberately a ref: no render reads it, only the view math does.
-  const contentRef = useRef({ w: 0, h: 0 });
-
-  /**
-   * The content size the view math should use. Before the first measurement
-   * lands (pre-layout, or environments without layout at all) it falls back to
-   * the viewport box — i.e. the old "content exactly fills the box" assumption,
-   * which locks the pan rather than letting it run unbounded.
-   */
-  function contentBox(fallbackW: number, fallbackH: number) {
-    const { w, h } = contentRef.current;
-    return { w: w || fallbackW, h: h || fallbackH };
-  }
+  const {
+    viewportRef,
+    expanded,
+    toggleExpanded,
+    handlePanStart,
+    spaceHeldRef,
+    capClass,
+    fitClass,
+    transformStyle,
+  } = useCanvasView({ contentRef: baseRef, resetKey: current });
 
   useEffect(() => {
     paint(baseRef.current, current);
@@ -87,153 +75,6 @@ export function FlattenCanvas({
       });
     }
   }, [overlay, current]);
-
-  // Measure the content box and keep it fresh (R23). `offsetWidth/Height` are
-  // LAYOUT pixels — unlike `getBoundingClientRect`, they are not multiplied by
-  // the CSS zoom transform, so they stay a stable basis for the pan bounds.
-  // A ResizeObserver covers container resizes; the effect deps cover a new
-  // image and the Expand toggle. ResizeObserver is a browser API absent in
-  // jsdom, hence the guard.
-  useEffect(() => {
-    const canvas = baseRef.current;
-    if (!canvas) {
-      return;
-    }
-    function measure() {
-      const el = baseRef.current;
-      const box = viewportRef.current;
-      if (!el || !box) {
-        return;
-      }
-      contentRef.current = { w: el.offsetWidth, h: el.offsetHeight };
-      // A resize can leave the current pan out of bounds (e.g. Expand grows
-      // the box); re-clamp, but only replace the view when it actually moves.
-      setView((v) => {
-        const next = clampView(
-          v,
-          box.offsetWidth,
-          box.offsetHeight,
-          el.offsetWidth,
-          el.offsetHeight,
-        );
-        return next.zoom === v.zoom &&
-          next.panX === v.panX &&
-          next.panY === v.panY
-          ? v
-          : next;
-      });
-    }
-    measure();
-    if (typeof ResizeObserver === "undefined") {
-      return;
-    }
-    const observer = new ResizeObserver(measure);
-    observer.observe(canvas);
-    if (viewportRef.current) {
-      observer.observe(viewportRef.current);
-    }
-    return () => observer.disconnect();
-  }, [current, expanded]);
-
-  // Scroll zoom (R23): non-passive so `preventDefault` stops the page from
-  // scrolling; zoom toward the cursor within [MIN_ZOOM, MAX_ZOOM].
-  useEffect(() => {
-    const el = viewportRef.current;
-    if (!el) {
-      return;
-    }
-    function onWheel(event: WheelEvent) {
-      event.preventDefault();
-      const rect = el!.getBoundingClientRect();
-      const direction = event.deltaY < 0 ? 1 : -1;
-      const content = contentBox(rect.width, rect.height);
-      setView((v) =>
-        zoomAt(
-          v,
-          direction,
-          event.clientX - rect.left,
-          event.clientY - rect.top,
-          rect.width,
-          rect.height,
-          content.w,
-          content.h,
-        ),
-      );
-    }
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, []);
-
-  // Space tracking for Space + left-drag panning (R23); guarded against text
-  // inputs and stopping the page from scrolling while held.
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.code !== "Space") {
-        return;
-      }
-      const target = event.target;
-      if (
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLButtonElement
-      ) {
-        return;
-      }
-      spaceHeldRef.current = true;
-      event.preventDefault();
-    }
-    function onKeyUp(event: KeyboardEvent) {
-      if (event.code === "Space") {
-        spaceHeldRef.current = false;
-      }
-    }
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
-    };
-  }, []);
-
-  // Drag-pan move/end live on the window so the drag survives the pointer
-  // leaving the viewport (R23).
-  useEffect(() => {
-    function onMove(event: globalThis.MouseEvent) {
-      const from = panFromRef.current;
-      if (!from) {
-        return;
-      }
-      const rect = viewportRef.current?.getBoundingClientRect();
-      if (!rect) {
-        return;
-      }
-      const dx = event.clientX - from.x;
-      const dy = event.clientY - from.y;
-      panFromRef.current = { x: event.clientX, y: event.clientY };
-      const content = contentBox(rect.width, rect.height);
-      setView((v) =>
-        panBy(v, dx, dy, rect.width, rect.height, content.w, content.h),
-      );
-    }
-    function onUp() {
-      panFromRef.current = null;
-    }
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, []);
-
-  // A middle-button press, or a left press while Space is held, begins a pan
-  // rather than a hover/select interaction (R23).
-  function handlePanStart(event: MouseEvent<HTMLDivElement>) {
-    if (event.button === 1 || (event.button === 0 && spaceHeldRef.current)) {
-      event.preventDefault();
-      panFromRef.current = { x: event.clientX, y: event.clientY };
-    }
-  }
 
   // DOM glue stays thin: read the canvas box (already transformed by the CSS
   // zoom/pan), defer the math to the pure `mapClickToPixel`, report the pixel.
@@ -291,20 +132,13 @@ export function FlattenCanvas({
     }, "image/png");
   }
 
-  // The viewport's height cap, applied to the canvases too so the WHOLE image
-  // is fitted inside the box at zoom 1 (R23): width-driven sizing alone lets a
-  // tall image overflow the clipped viewport, hiding its bottom. Expand only
-  // raises the cap. Literal class names keep them visible to the Tailwind JIT.
-  const capClass = expanded ? "max-h-[85vh]" : "max-h-[60vh]";
-  const fitClass = `h-auto w-full max-w-full object-contain ${capClass}`;
-
   return (
     <div className="flex flex-col gap-2">
       <div className="flex justify-end">
         <button
           type="button"
           aria-pressed={expanded}
-          onClick={() => setExpanded((on) => !on)}
+          onClick={toggleExpanded}
           className={`h-8 rounded-md border px-2 text-xs hover:bg-accent ${
             expanded ? "bg-accent ring-2 ring-ring" : ""
           }`}
@@ -324,9 +158,7 @@ export function FlattenCanvas({
         <div
           data-testid="flatten-transform"
           className="origin-top-left"
-          style={{
-            transform: `translate(${view.panX}px, ${view.panY}px) scale(${view.zoom})`,
-          }}
+          style={transformStyle}
         >
           <canvas
             ref={baseRef}
