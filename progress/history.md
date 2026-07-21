@@ -247,3 +247,29 @@
 **Reports:** `progress/impl_12_flatten.md`, `progress/review_12_flatten_phaseA.md`, `progress/review_12_flatten_phaseB.md`, `progress/review_12_flatten_phaseC.md`.
 
 ---
+
+## 13_crop — DONE (2026-07-21)
+
+**Feature:** Crop-to-print-size stage for `/image-prep`. Requested after the user described leaving the app to crop in **Canva** so a generated 3:4 image would match an exact physical print size (their example **71.7 × 94 mm**) before HueForge. Feasibility discussed first, then spec_author → human-approved → implement → reviewer-APPROVED. Depends on `11_image_prep` + `12_flatten`.
+
+**The framing that shaped it:** a millimetre target is really two requirements — (1) an exact **aspect ratio**, which needs no DPI, and (2) an absolute pixel size, which would need a px/mm choice. For HueForge only (1) matters, because HueForge maps the image onto the physical footprint and resamples itself. The user chose **option A: ratio-only** — crop to the exact ratio, KEEP maximum available pixels, **no resampling**. Option B (explicit px/mm resampling) is deliberately out of scope.
+
+**Delivered:** `lib/crop-core.ts` — a third PURE core (no DOM/Prisma/React, no new dependency) at **100% branch coverage**: mm→aspect ratio, `clampRectToImage`, ratio-locked move/resize-from-handle, `refitRect`, Fit/Fill/Reset, px/mm computation and the R11 caution/warning grading (**tied to a 0.4 mm nozzle**, so the warning means something physical rather than an arbitrary DPI number), `CROP_PRESETS` + `DEFAULT_PRINT_SIZE` (71.7 × 94 — the user's size), and a `WORKING_CAP_PX` re-export so the panel and the core pin the same 2048 rather than the UI hard-coding it. Components `CropStartCard` / `CropWorkspace` / `CropCanvas` / `CropSizePanel`. **No worker action** — a crop is one buffer slice, so shipping it to the worker would cost more than it saves (justified in design.md).
+
+**Shared canvas view hook (the notable refactor):** the crop and flatten canvases both need pointer→pixel geometry, `paint`, ResizeObserver content measurement, and zoom/pan, so that logic was extracted into `components/image-prep/use-canvas-view.ts` and both canvases now use it. This touched **working, shipped** flatten code, so it was gated explicitly: the extraction is **verbatim**, and `components/image-prep/__tests__/FlattenWorkspace.test.tsx` + `lib/__tests__/flatten-core.test.ts` are **unmodified** — the reviewer verified empty `git diff`s on both and ran them green (92/92), including the two tall-image pan-bounds regression tests from the bug fixed in `64a482c` and the R24 click-to-pixel-under-zoom tests. Content is still measured untransformed (`offsetWidth`/`offsetHeight` + ResizeObserver) feeding `clampView`, so the fix survives.
+
+**Upstream-commit semantics:** Apply crop builds a **fresh `loaded` stage**, so downstream quantized/flatten results are discarded structurally per the R16 invariant — a crop cannot leave a stale palette or flatten result behind. Cancel/Revert restores from the retained `uploaded` buffer without resurrecting stale state.
+
+**No-persistence contract (same as 11 and 12):** no Prisma/schema/migration/Storage/server-action/API-route/env/dependency change. **Persisted user-defined presets are deliberately OUT of scope** — they would require localStorage or the DB and break this contract; presets are built-in constants only. Making user presets persistent would be a deliberate contract change needing the human, not a bug.
+
+**Requirements:** R1–R22 all satisfied and traced to genuine behavioral tests.
+
+**Verification:** typecheck 0 errors, lint 0 errors, Vitest **1094 tests / 67 files** (was 996/65 → +98 tests / +2 files), 0 failures; `lib/crop-core.ts` **100% branch**; changed modules ≥ 83% lines. Build intentionally skipped during dev (running dev server shares `.next`); Vercel is the build target. Reviewer independently reproduced.
+
+**Decisions/deviations (minor, reviewer-accepted):** `clampRectToImage` on a degenerate image lets **image bounds win over the `MIN_CROP_PX` usability floor** (each side floored at 1px) so the rect is never empty nor out of bounds; `refitRect` clamps the SIZE first and then centres (sizing after positioning let the clamp drift the centre — pinned by a regression test); `moveRect` reads the ratio off the rect so a nudge can never drift the size; Reset restores `DEFAULT_PRINT_SIZE` rather than a captured entry size.
+
+**Outstanding (credential-gated, dev/staging only — never production):** run Playwright E2E (`e2e/crop.spec.ts`) after setting `.env.local` + E2E account vars. The E2E backlog now spans 11, 12, and 13 and is the one real gap between "tested" and "verified in a real browser".
+
+**Reports:** `progress/impl_13_crop.md`, `progress/review_13_crop.md`.
+
+---

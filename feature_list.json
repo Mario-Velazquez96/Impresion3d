@@ -96,7 +96,7 @@
       "name": "13_crop",
       "description": "Crop-to-print-size stage for image-prep (client-side, NO persistence): enter a target physical print size in millimetres (e.g. 71.7 x 94) or pick a built-in preset, and the tool derives the aspect ratio and shows a crop rectangle LOCKED to it over the working image - drag to reposition, handles to resize, never out of ratio. Live readout of the resulting pixel dimensions and effective px/mm so the user can see the print is not resolution-starved. Fit/Fill helpers snap the rect to the largest valid crop; swap orientation (portrait/landscape). Cropping commits to the working image so every downstream stage (posterize, flatten) picks it up. Ratio-only by design (option A): keeps maximum available pixels, NO resampling to an explicit pixel target. Replaces the external Canva round-trip. Pure crop/aspect/mm math in lib/, fully unit-tested; reuses the proven mapClickToPixel geometry and the FlattenCanvas overlay/ResizeObserver patterns. Out of scope: resampling to an explicit px/mm (option B), persisted user-defined presets (would break the no-persistence contract), rotation, non-uniform stretch.",
       "sdd": true,
-      "status": "in_progress",
+      "status": "done",
       "depends_on": ["11_image_prep", "12_flatten"]
     }
   ]

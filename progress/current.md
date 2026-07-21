@@ -1,22 +1,12 @@
 # Current session
 
 ## Feature in progress
-`13_crop` — **in_progress**. Spec approved by the human (2026-07-21);
-implementer executing `specs/13_crop/tasks.md` (single phase).
-
-Added 2026-07-21 after a feasibility discussion: the user was leaving the
-app to crop images in **Canva** to an exact physical print size (their
-example 71.7 × 94 mm) before HueForge. Agreed framing: a mm target is
-really (1) an exact aspect ratio — needs no DPI — and (2) an absolute
-pixel size, which would need a px/mm choice. For HueForge only (1)
-matters, so the user chose **option A: ratio-only** — crop to the exact
-ratio, keep maximum available pixels, NO resampling. Persisted
-user-defined presets are deliberately OUT of scope: they would break the
-no-persistence contract shared by 11 and 12 (built-in constants only).
+_None — no feature is currently in progress. Pick up the next `pending`
+feature in `feature_list.json` per the SDD flow._
 
 ## State
-All features `00`–`12` are reviewer-APPROVED and `done` (see `progress/history.md`
-for per-feature entries). Latest full run: **989 tests / 65 files** green
+All features `00`–`13` are reviewer-APPROVED and `done` (see `progress/history.md`
+for per-feature entries). Latest full run: **1094 tests / 67 files** green
 (typecheck · lint · Vitest).
 
 **Deployed.** The app is live on Vercel, auto-deploying from `main`:
@@ -47,6 +37,15 @@ for per-feature entries). Latest full run: **989 tests / 65 files** green
   Reset all, zoom/pan/Expand. Second pure core `lib/flatten-core.ts` at 100%
   branch coverage. No persistence. Delivered in three reviewed phases
   (A `9cdc5a9` · B `42f75bf` · C `383bd7e`).
+- `13_crop` — **crop-to-print-size** stage inside `/image-prep`: enter a target
+  print size in mm (or a built-in preset; default 71.7 × 94) and crop to that
+  exact aspect ratio with a ratio-locked rectangle, Fit/Fill/Reset, orientation
+  swap, and a px/mm readout warning (0.4 mm-nozzle-based) when a print would be
+  resolution-starved. **Ratio-only by design** — keeps maximum available pixels,
+  NO resampling. Replaces the external Canva round-trip. Third pure core
+  `lib/crop-core.ts` at 100% branch; introduced the shared
+  `components/image-prep/use-canvas-view.ts` hook now used by BOTH crop and
+  flatten. No persistence.
 - Dark theme; shared `MainNav` (consistent app/admin nav + Catalogs + Calculator
   + Image prep links); planning picker lists the full Color catalog; home
   "Get started" wired to `/board`.
